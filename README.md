@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-2.1-success)
+![Versão](https://img.shields.io/badge/firmware-2.6-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -50,6 +50,9 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 **Interface**
 - Display OLED 0,96" com **6 telas** animadas e barra inferior com hora e temperatura externa.
+- **Dois botões físicos**: um clique no primeiro passa para a próxima tela, e segurando por 8 s ele apaga só o WiFi salvo; o segundo botão faz o **reset geral** (apaga o WiFi e todos os ajustes) ao ser segurado por 10 s.
+- **Tempo de cada tela** configurável na página (5 a 30 s, de 5 em 5).
+- **Tempo de tela ligada** (sempre ligada, 1, 5, 10, 15, 30 ou 60 min): depois desse tempo a tela apaga sozinha para economizar bateria. Um clique no botão acende; no horário agendado como desligado, o clique acende a tela por 10 s.
 - **Página web responsiva** (celular e computador): clima, cartões, bússola de vento, anel de umidade, previsão, gráfico com eixos e seleção de ponto, ícones de configurações, tela, sinal WiFi e bateria.
 - Tema escuro, sem dependência de internet para exibir a página (tudo embutido no ESP).
 
@@ -93,7 +96,7 @@ flowchart LR
 
 ## 📟 Telas do display OLED
 
-As telas deslizam automaticamente. A barra inferior mostra a hora (esquerda) e a temperatura externa (direita).
+As telas deslizam automaticamente (padrão: **5 s** cada, ajustável de 5 a 30 s em `/config` → Tela) e um clique no **botão físico** passa para a próxima a qualquer momento. A barra inferior mostra a hora (esquerda) e a temperatura externa (direita).
 
 1. **Data e hora**
 2. **Clima interno** (umidade e temperatura, uma casa decimal)
@@ -105,8 +108,8 @@ As telas deslizam automaticamente. A barra inferior mostra a hora (esquerda) e a
 Tela 6, na ordem das linhas:
 
 ```
-[▮▮▮▯] 85%  3.92V     1. bateria (ícone, percentual e tensão)
-▂▄▆█   -62dBm  76%      2. sinal do WiFi (ícone de barras, dBm e %)
+[▮▮▮▯] 85%  3.92V        1. bateria (ícone, percentual e tensão)
+▂▄▆█   -62dBm  76%       2. sinal do WiFi (ícone de barras, dBm e %)
 SSID: MinhaRede          3. nome da rede
 IP: 192.168.0.50         4. IP (use no navegador)
 ```
@@ -141,6 +144,7 @@ Abra `http://IP-DO-ESP/` (o IP aparece na tela 6 do OLED).
 | Resistor 10 kΩ | Só se o DHT for o de 4 pinos solto (pull-up no dado) |
 | *(opcional)* Bateria Li-ion 18650 | Com módulo de carga/proteção (ex.: TP4056 com proteção) |
 | *(opcional)* Resistor 100 kΩ | Divisor para ler a bateria no A0 |
+| 2 botões de pressão (normalmente abertos) | Um passa as telas e apaga o WiFi; o outro faz o reset geral |
 | Jumpers e protoboard | |
 
 ---
@@ -158,35 +162,58 @@ Abra `http://IP-DO-ESP/` (o IP aparece na tela 6 do OLED).
 | DHT22 VCC / GND | 3V3 / GND |
 | Bateria (via divisor) | **A0** |
 | LED azul (status) | interno (GPIO2 = D4; em algumas NodeMCU também GPIO16 = D0) |
+| Botão das telas / apagar WiFi | **D7** (GPIO13) → GND |
+| Botão de reset geral | **D6** (GPIO12) → GND (na variante B use o **D1**) |
 
 **Por que D1/D2 no display:** são os pinos I2C padrão e não têm função especial no boot. Evite **D3 (GPIO0), D4 (GPIO2) e D8 (GPIO15)**, que são pinos de boot, e lembre que o D4 é o LED.
 
 ### Variante B: NodeMCU com OLED integrado
 
-O OLED já vem soldado em **D5 (SDA)** e **D6 (SCL)** neste modelo (confirmado na prática; algumas fichas de venda trazem esses números trocados). Ajuste no código:
+O OLED já vem soldado em **D5 (SDA)** e **D6 (SCL)** neste modelo (confirmado na prática; algumas fichas de venda trazem esses números trocados).
+
+| Componente | Pino |
+|---|---|
+| OLED SDA / SCL | **D5 / D6** (já soldados na placa) |
+| DHT22 dado | **D2** (GPIO4) |
+| Botão das telas | **D7** → GND |
+| Botão de reset geral | **D1** → GND (o D6 é o SCL do display) |
+
+Para usar essa placa, **troque uma única linha** no topo do código (seção 2, "Seleção da placa e pinagem"):
 
 ```cpp
-const int SDA_PIN = D5;
-const int SDC_PIN = D6;
+//#define PLACA_ESP8266_COMUM          // comente esta
+#define PLACA_OLED_INTEGRADO           // e descomente esta
 ```
 
-E ligue o sensor em outro pino, por exemplo o **D2**:
-
-```cpp
-#define DHTPIN 4                        // GPIO4 = D2
-```
-
-Se a tela ficar em branco, troque `SDA_PIN` e `SDC_PIN` entre si.
+Os pinos do display, do sensor e dos botões mudam sozinhos. Se a tela ficar em branco, troque `DISPLAY_SDA` e `DISPLAY_SCL` entre si no bloco dessa placa.
 
 ### Sensor DHT11 em vez de DHT22
 
-Troque apenas o tipo (a biblioteca é a mesma):
+No bloco da sua placa (seção 2 do código), troque apenas o tipo (a biblioteca é a mesma):
 
 ```cpp
 #define DHTTYPE DHT11
 ```
 
 O DHT11 mede em passos inteiros (a casa decimal ficará sempre zero), com precisão menor e só de 0 a 50 °C.
+
+### Botões físicos
+
+Ligue cada botão de pressão **entre o pino e o GND**. Não precisa de resistor: o código usa o pull-up interno.
+
+| Botão | Pino padrão | Ação | O que acontece |
+|---|---|---|---|
+| **Das telas** | **D7** (GPIO13) | Clique | Próxima tela do OLED. Com a tela apagada, o clique só liga a tela |
+| | | Segurar 3 s | Aparece "Apagando o WiFi..." com barra de progresso e o LED pisca rápido. Soltar cancela |
+| | | Segurar 8 s | Apaga **só a rede WiFi salva** e reinicia. Na volta, abre o portal `ESP_WeatherStation` |
+| **Reset geral** | **D6** (GPIO12); na variante B, **D1** | Segurar 3 s | Aparece "RESET GERAL - Apaga WiFi e ajustes" com barra de progresso e o LED pisca rápido. Soltar cancela |
+| | | Segurar 10 s | Apaga o **WiFi e todos os ajustes salvos** (chave do OpenWeatherMap, cidade, idioma, fuso, agenda, bateria, ID/URL/`DEVICE_KEY` do painel e tempo das telas) e reinicia no padrão do código |
+
+Um toque rápido no botão de reset geral não faz nada: é preciso segurar. Se não quiser esse botão, defina `PIN_BOTAO_RESET` como `-1`; o botão das telas continua apagando o WiFi ao ser segurado.
+
+Evite D0, D3, D4 e D8 (pinos de boot e LED) e os pinos do display e do sensor.
+
+> A leitura dos botões acontece no laço principal. Cliques durante o envio à API ou a atualização do clima (alguns segundos) podem ser perdidos.
 
 ### Bateria no A0
 
@@ -240,6 +267,8 @@ Já fazem parte do pacote ESP8266: `ESP8266WiFi`, `ESP8266WebServer`, `ArduinoOT
 5. Na aba **Clima**, informe a **chave da API do OpenWeatherMap**, o **ID da cidade** e escolha o **idioma** e o **fuso**.
 6. Pronto. Se quiser enviar para o painel, preencha também **Painel web (API)** (veja [mais abaixo](#-envio-para-o-painel-web-api)).
 
+**Trocar de rede depois:** segure o botão das telas por 8 s (apaga o WiFi salvo e abre o portal) ou use `/config` → **WiFi** → "Apagar dados de WiFi". Para voltar tudo ao padrão de fábrica, segure o botão de reset geral por 10 s.
+
 **OpenWeatherMap:** crie a conta e a chave em <https://home.openweathermap.org/api_keys> (chaves novas podem levar um tempo para ativar). Para o ID da cidade, busque em <https://openweathermap.org/find> e copie o número no fim do endereço (`.../city/3448439`). Você pode colar o endereço inteiro no campo.
 
 > 💡 O padrão do código é fuso `-3` (Brasília), sem horário de verão, idioma `pt_br`.
@@ -253,10 +282,10 @@ A página é dividida em **abas**; cada ação salva volta para a aba certa com 
 | Aba | O que tem |
 |---|---|
 | **Clima** | Chave da API, ID da cidade, idioma (7 opções), fuso horário (34 opções) e horário de verão; seção **Painel web (API)** com ID do dispositivo, URL da API, `DEVICE_KEY`, botão **Enviar dados agora**, resultado do último envio e cidade enviada |
-| **Tela** | Ligar/apagar o display e **horário automático** (ligar às / apagar às; aceita janela que passa da meia-noite) |
+| **Tela** | Ligar/apagar o display, **tempo de cada tela** (5 a 30 s, de 5 em 5), **tempo de tela ligada** (sempre ligada ou 1, 5, 10, 15, 30, 60 min) e **horário automático** (ligar às / apagar às; aceita janela que passa da meia-noite) |
 | **Bateria** | Ativar/desativar a leitura (por dispositivo) e estado: carga, tensão e situação |
 | **WiFi** | Dados da conexão com ícone de sinal, abrir o portal de configuração e apagar a rede salva |
-| **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), chip, CPU, flash, programa, memória, firmware, versão do core |
+| **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), chip, CPU, flash, programa, memória, firmware, versão do core, sensor e o botão **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
 
 Tudo é gravado na EEPROM e sobrevive a reinicializações e a novos uploads (só uma limpeza total da flash apaga). Campos de chave aceitam deixar em branco para **manter o valor atual**; só os 4 últimos caracteres aparecem.
 
@@ -300,6 +329,7 @@ O LED azul (GPIO2 e, quando existir, GPIO16) indica o estado sem travar o progra
 | Enviando dados ao painel | pisca rápido |
 | Envio concluído / WiFi voltou | acende uma vez (0,3 s) |
 | Falha no envio | 3 piscadas curtas |
+| Botão segurado por mais de 3 s (aviso de reset) | pisca rápido |
 | Normal | apagado |
 
 Para desligar tudo: `#define LED_STATUS_ATIVO false`.
@@ -350,7 +380,7 @@ O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe
 curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   -H "Content-Type: application/json" \
   -H "x-device-key: SUA_DEVICE_KEY" \
-  -d '{"device_id":"esp8266-sala","temperature":25.3,"humidity":58.2,"ip":"192.168.0.50","rssi":-62,"city_id":3448439,"city_name":"São Paulo","firmware":"2.1","battery_active":true,"battery":85,"battery_voltage":3.92}'
+  -d '{"device_id":"esp8266-sala","temperature":25.3,"humidity":58.2,"ip":"192.168.0.50","rssi":-62,"city_id":3448439,"city_name":"São Paulo","firmware":"2.6","battery_active":true,"battery":85,"battery_voltage":3.92}'
 ```
 
 > O ESP usa **HTTPS sem validar o certificado** (`setInsecure()`), com buffer de 1024 bytes (`API_TLS_RX_BUF`). Se a conexão falhar por falta de memória, aumente esse valor ou veja a aba **Sistema**.
@@ -368,11 +398,14 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | POST | `/salvar` | Salva chave, cidade, idioma e fuso |
 | POST | `/display` | Liga/apaga a tela (`estado=1`, `0` ou `t`) |
 | POST | `/agenda` | Salva o horário automático da tela |
+| POST | `/tempotela` | Salva o tempo de cada tela do OLED (5 a 30 s) |
+| POST | `/tempoligada` | Salva o tempo de tela ligada (0 = sempre ligada; 1, 5, 10, 15, 30 ou 60 min) |
 | POST | `/bateria` | Ativa/desativa a bateria |
 | POST | `/api` | Salva ID, URL e `DEVICE_KEY` do painel |
 | POST | `/enviar` | Envia uma leitura agora |
 | POST | `/portal` | Abre o portal de configuração de WiFi |
 | POST | `/reset-wifi` | Apaga a rede WiFi salva e reinicia |
+| POST | `/reset-geral` | Apaga o WiFi e todos os ajustes salvos e reinicia |
 
 **Exemplo de `/json`**
 
@@ -409,10 +442,15 @@ As principais constantes ficam no topo do `WeatherStation.ino`:
 
 | Constante | O que faz |
 |---|---|
-| `DHTPIN`, `DHTTYPE` | Pino e modelo do sensor (`DHT22` ou `DHT11`) |
-| `SDA_PIN`, `SDC_PIN` | Pinos I2C do display |
+| `PLACA_ESP8266_COMUM` / `PLACA_OLED_INTEGRADO` | **Escolhe a placa** (descomente só uma): define os pinos do display, do sensor e dos botões |
+| `DHTPIN`, `DHTTYPE` | Pino e modelo do sensor (`DHT22` ou `DHT11`), no bloco da placa |
+| `DISPLAY_SDA`, `DISPLAY_SCL` | Pinos I2C do display, no bloco da placa |
 | `I2C_DISPLAY_ADDRESS` | Endereço do OLED (`0x3c`) |
 | `LED_STATUS_ATIVO` | Liga/desliga o LED de status |
+| `PIN_BOTAO_TELA` | Pino do botão das telas (padrão `D7`), no bloco da placa |
+| `PIN_BOTAO_RESET` | Pino do botão de reset geral (`D6` na placa comum, `D1` na com OLED integrado; `-1` desativa), no bloco da placa |
+| `TELA_ACORDAR_NOITE_MS` | Quanto tempo a tela fica acesa ao apertar o botão no horário agendado como desligado (10 s) |
+| `BOTAO_AVISO_MS`, `BOTAO_RESET_MS`, `BOTAO_RESET_GERAL_MS` | Tempo segurando para mostrar o aviso (3 s), apagar só o WiFi (8 s, botão das telas) e fazer o reset geral (10 s) |
 | `BATERIA_ATIVA_PADRAO` | Padrão de fábrica da bateria (muda em `/config`) |
 | `BAT_FATOR`, `BAT_CALIB` | Divisor e calibração da bateria |
 | `BAT_AVISO_PCT`, `BAT_CRITICA_PCT` | Limites dos avisos de bateria |
@@ -430,6 +468,30 @@ O corpo do envio à API está todo na função `montaPayloadApi()`.
 
 ---
 
+### Organização do arquivo e troca de placa
+
+O `WeatherStation.ino` é um arquivo único, dividido em seções numeradas. Todas as funções têm um comentário explicando o que fazem, e as variáveis são agrupadas por assunto.
+
+| Seção | Conteúdo |
+|---|---|
+| 1. Bibliotecas | `#include`, agrupados por finalidade |
+| 2. Seleção da placa e pinagem | **O que muda ao trocar de ESP**: display, sensor e botões |
+| 3. Configurações do projeto | Constantes ajustáveis (tempos, bateria, API, clima, fuso...) |
+| 4. Tipos | Estrutura da EEPROM, lista de fusos, estados do LED |
+| 5. Objetos e variáveis de estado | Agrupados: clima, sensor, tela, agenda, bateria, API, LED, botões |
+| 6. Protótipos | Todas as funções declaradas, para a ordem não importar |
+| 7. Tabelas | Telas do OLED, idiomas, fusos, abas e o HTML da página principal |
+| 8. Funções | Principal (`setup`/`loop`), configuração salva, LED, botões, sensores, bateria, clima, display, tela, WiFi, painel (API) e servidor web |
+
+**Trocar de placa** é só mudar uma linha na seção 2:
+
+```cpp
+#define PLACA_ESP8266_COMUM            // ESP8266 sem OLED integrado + OLED externo (modelo principal)
+//#define PLACA_OLED_INTEGRADO         // NodeMCU com o OLED 0,96" já soldado na placa
+```
+
+---
+
 ## 🔐 Segurança
 
 - **Senha do OTA:** defina a sua em `ArduinoOTA.setPassword("...")`. Sem senha, qualquer pessoa na rede pode enviar firmware para o ESP.
@@ -444,7 +506,7 @@ O corpo do envio à API está todo na função `montaPayloadApi()`.
 
 | Sintoma | O que verificar |
 |---|---|
-| **Tela em branco** | Ligação SDA/SCL, endereço `0x3C`; troque `SDA_PIN` e `SDC_PIN`. A varredura do I2C no Serial (115200) lista o que respondeu |
+| **Tela em branco** | Ligação SDA/SCL, endereço `0x3C`; troque `DISPLAY_SDA` e `DISPLAY_SCL` no bloco da placa. A varredura do I2C no Serial (115200) lista o que respondeu |
 | **LED pisca junto com a tela** | O display está no D4. Mude para D1/D2 (variante A) |
 | **Temperatura/umidade `--` ou erro de sensor** | Pino do dado, 3,3 V, resistor de 10 kΩ (DHT de 4 pinos), `DHTTYPE` correto |
 | **"Sem dados do clima"** | Chave e ID da cidade na aba Clima; chaves novas demoram a ativar |
@@ -455,6 +517,11 @@ O corpo do envio à API está todo na função `montaPayloadApi()`.
 | **Hora errada** | Fuso e horário de verão na aba Clima; aguarde a sincronização NTP |
 | **Porcentagem da bateria estranha** | Calibre `BAT_CALIB` com multímetro e confira o divisor |
 | **OTA não aparece** | PC e ESP na mesma rede; reinicie a IDE; confira o firewall |
+| **A tela apaga sozinha** | É o **tempo de tela ligada** (`/config` → Tela). Aperte o botão das telas uma vez para acender; escolha "Sempre ligada" para desativar |
+| **Erro "Escolha apenas UMA placa" ou "Nenhuma placa selecionada"** | Deixe sem comentário só uma das linhas `PLACA_...` na seção 2 do código |
+| **Botão não responde** | Ligue entre o pino e o GND (D7 para as telas, D6 para o reset geral); confira `PIN_BOTAO_TELA` e `PIN_BOTAO_RESET`; cliques durante o envio à API ou a atualização do clima podem ser perdidos |
+| **Quero trocar de rede WiFi** | Segure o botão das telas por 8 s, ou aba WiFi → "Apagar dados de WiFi" |
+| **Quero voltar ao padrão de fábrica** | Segure o botão de reset geral por 10 s, ou `/config` → Sistema → **Reset geral** (apaga o WiFi e todos os ajustes) |
 
 ---
 
@@ -479,6 +546,11 @@ WeatherStation/
 | **1.0** | Base do exemplo WeatherStation (ThingPulse) com clima, previsão e DHT |
 | **2.0** | Página web completa, `/config` em abas, configuração salva na flash, agenda da tela, fuso, bateria, OTA com senha, envio ao painel via API |
 | **2.1** | LED de status, pinos do display configuráveis para ESP8266 comum e com OLED integrado, ícone de sinal de WiFi no OLED, `city_id` e `city_name` na API, curva de bateria calibrada |
+| **2.2** | Botão físico (próxima tela e apagar WiFi), tempo de cada tela configurável (5 a 30 s) |
+| **2.3** | Segundo botão físico de reset geral (apaga WiFi e todos os ajustes) |
+| **2.4** | Botão **Reset geral** na `/config` (aba Sistema), com confirmação |
+| **2.5** | **Tempo de tela ligada** (apaga sozinha; o clique acende, 10 s no horário desligado) |
+| **2.6** | Código reorganizado em seções comentadas e **seleção de placa por uma linha** (ESP8266 comum ou NodeMCU com OLED integrado) |
 
 ---
 
@@ -505,7 +577,7 @@ Este projeto é distribuído sob a **licença MIT**. Mantenha o aviso de copyrig
 MIT License
 
 Copyright (c) 2018 Daniel Eichhorn - ThingPulse (código original)
-Copyright (c) 2026 LuismarPavani
+Copyright (c) 2026 SEU NOME (modificações)
 
 É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia deste
 software e dos arquivos de documentação associados, para lidar com o Software sem
