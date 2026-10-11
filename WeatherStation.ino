@@ -1,3 +1,27 @@
+/**The MIT License (MIT)
+
+Copyright (c) 2018 by Daniel Eichhorn - ThingPulse
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+See more at https://thingpulse.com
+*/
 
 /*
  * WeatherStation ESP8266: estação meteorológica com display OLED, sensor DHT, clima do OpenWeatherMap,
@@ -116,7 +140,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "2.6"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "2.7"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "ESP8266-OTA-"
 
 // ---- Display OLED e sensor ----------------------------------------------------------------
@@ -130,6 +154,7 @@ const unsigned long BOTAO_AVISO_MS    = 3000;   // a partir daqui aparece o avis
 const unsigned long BOTAO_RESET_MS    = 8000;   // botão das telas: tempo segurando para apagar só o WiFi
 const unsigned long BOTAO_RESET_GERAL_MS = 10000; // botão de reset geral: tempo segurando para apagar tudo
 const unsigned long TELA_ACORDAR_NOITE_MS = 10000; // no horário agendado como desligado, o clique liga a tela só por este tempo
+const unsigned long TELA_MENSAGEM_MS = 3500;     // quanto tempo uma mensagem (ex.: resultado do envio ao painel) fica no OLED
 // LED azul (GPIO2 e GPIO16): pisca rápido = conectando ao WiFi, enviando ou aviso de reset; uma piscada longa a cada 2 s = sem WiFi;
 // 1 acendida = sucesso; 3 piscadas curtas = falha. false = LED sempre apagado.
 #define LED_STATUS_ATIVO true
@@ -251,6 +276,14 @@ unsigned long telaDesligaEm = 0;        // millis() em que a tela apaga sozinha
 bool telaContando = false;              // true = há uma contagem para apagar a tela
 bool telaAcordadaNoite = false;         // true = tela acordada pelo botão no horário agendado como desligado
 
+// ---- Mensagem temporária no OLED (ex.: resultado do envio ao painel pelo botão) -----------
+String msgTitulo = "";                  // 1ª linha da mensagem
+String msgLinha1 = "";                  // 2ª linha
+String msgLinha2 = "";                  // 3ª linha (quebra em até 2 linhas se for longa)
+unsigned long msgAte = 0;               // millis() em que a mensagem some
+bool msgAtiva = false;                  // true enquanto a mensagem está na tela
+bool msgLigouTela = false;              // true = a mensagem acendeu a tela; apaga de novo ao terminar
+
 // ---- Agenda da tela (minutos desde 00:00) -------------------------------------------------
 bool agendaAtiva = false;
 uint16_t agendaLiga = 6 * 60;           // 06:00
@@ -319,6 +352,7 @@ void desenhaAvisoReset(int pct, bool geral);
 void resetWiFiPeloBotao();
 void resetGeralPeloBotao();
 bool trataBotoes(unsigned long ms);
+void enviarPeloBotao();
 
 // ---- SENSORES E HISTÓRICO -----------------------------------------------------------------
 void varreduraI2C();
@@ -337,6 +371,9 @@ void updateData(OLEDDisplay *display);
 // ---- DISPLAY OLED: TELAS E ÍCONES ---------------------------------------------------------
 void aplicaDisplay();
 void drawProgress(OLEDDisplay *display, int percentage, String label);
+void mostraMensagemTela(const String& titulo, const String& l1, const String& l2, unsigned long dur);
+void desenhaMensagemTela();
+bool trataMensagemTela(unsigned long ms);
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
@@ -805,6 +842,7 @@ void loop() {
 
   bool segurandoReset = trataBotoes(ms);   // botão físico: clique = próxima tela; segurar = apagar WiFi
   verificaTimerTela(ms);                   // apaga a tela quando o tempo de tela ligada acabar
+  bool mostrandoMsg = trataMensagemTela(ms);   // mensagem temporária no OLED (ex.: resultado do envio)
 
   // Estado da rede: pisca devagar se o WiFi cair (como em interruptores inteligentes)
   if ((long)(ms - nextRede) >= 0) {
@@ -858,7 +896,7 @@ void loop() {
     updateData(&display);
   }
 
-  if (displayLigado && !segurandoReset) {
+  if (displayLigado && !segurandoReset && !mostrandoMsg) {
     int remainingTimeBudget = ui.update();
 
     if (remainingTimeBudget > 0) {
@@ -1089,8 +1127,21 @@ void resetGeralPeloBotao() {
 }
 
 /**
- * Chamada a cada volta do loop(): lê os dois botões, executa clique, aviso e resets. Devolve true
- * enquanto um aviso de reset está na tela.
+ * Clique no botão de reset geral: envia uma leitura ao painel agora (como o botão 'Enviar dados
+ * agora' da /config) e mostra no OLED 'Enviando...' e depois o resultado com o código HTTP ou o
+ * erro.
+ */
+void enviarPeloBotao() {
+  mostraMensagemTela("ENVIO AO PAINEL", "Enviando...", "", 20000);   // aparece já durante o envio, que pode demorar
+  bool ok = enviaParaApi();
+  if (ok) nextApi = millis() + PAINEL_INTERVAL_MS;                 // recomeça o ciclo do envio automático
+  mostraMensagemTela("ENVIO AO PAINEL", ok ? "Enviado com sucesso" : "Falha no envio", apiUltimoMsg, TELA_MENSAGEM_MS);
+}
+
+/**
+ * Chamada a cada volta do loop(): lê os dois botões. Clique no botão das telas = próxima tela;
+ * clique no botão de reset geral = envia os dados ao painel. Segurar executa os resets (com aviso
+ * na tela). Devolve true enquanto um aviso de reset está na tela.
  */
 bool trataBotoes(unsigned long ms) {
   bool aviso = false;
@@ -1112,8 +1163,9 @@ bool trataBotoes(unsigned long ms) {
       }
     }
 
-    if (mudou && !btnEstado[i] && i == 0) {             // soltou o botão das telas
-      if (ms - btnDesde[i] < BOTAO_AVISO_MS) proximaTela();   // clique curto; segurar e soltar cancela
+    if (mudou && !btnEstado[i] && ms - btnDesde[i] < BOTAO_AVISO_MS) {   // soltou depois de um clique curto (segurar e soltar cancela)
+      if (i == 0) proximaTela();                        // botão das telas: próxima tela
+      else enviarPeloBotao();                           // botão de reset geral: envia os dados ao painel
     }
   }
   ledAviso = aviso;                                     // LED pisca rápido durante o aviso
@@ -1229,11 +1281,15 @@ const char* bateriaSituacao(float v) {
 // ---- CLIMA (OpenWeatherMap) ---------------------------------------------------------------
 
 /**
- * Consulta o OpenWeatherMap (clima atual e previsão) mostrando o progresso no OLED. Define
- * weatherOk e agenda a próxima consulta (ou nova tentativa se falhar).
+ * Consulta o OpenWeatherMap (clima atual e previsão) mostrando o progresso no OLED. No boot, se
+ * faltar a chave da API, mostra um aviso com o endereço da /config. Define weatherOk e agenda a
+ * próxima consulta (ou nova tentativa se falhar).
  */
 void updateData(OLEDDisplay *display) {
   readyForWeatherUpdate = false;
+  static bool primeiraVez = true;        // 1ª consulta = a do boot: mostra avisos mais longos no OLED
+  bool noBoot = primeiraVez;
+  primeiraVez = false;
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Sem WiFi, nova tentativa em 1 min");
@@ -1243,6 +1299,16 @@ void updateData(OLEDDisplay *display) {
 
   if (OPEN_WEATHER_MAP_APP_ID.length() == 0) {
     Serial.println("Sem chave da API: configure em /config");
+    if (noBoot) {                        // no boot, avisa no OLED em vez de deixar a tela preta
+      display->clear();
+      display->setTextAlignment(TEXT_ALIGN_CENTER);
+      display->setFont(ArialMT_Plain_10);
+      display->drawString(64, 2, "Sem chave da API");
+      display->drawString(64, 18, "Abra no navegador:");
+      display->drawString(64, 32, WiFi.localIP().toString() + "/config");
+      display->display();
+      delay(3500);
+    }
     weatherOk = false;
     nextWeatherUpdate = millis() + RETRY_INTERVAL_MS;
     return;
@@ -1257,7 +1323,7 @@ void updateData(OLEDDisplay *display) {
 
   weatherOk = currentWeather.cityName.length() > 0;
   drawProgress(display, 100, weatherOk ? "Pronto..." : "Falha ao obter o clima");
-  delay(300);
+  delay(noBoot ? (weatherOk ? 700 : 2500) : 300);   // no boot a tela de progresso fica visível por mais tempo
 
   nextWeatherUpdate = millis() + (weatherOk ? UPDATE_INTERVAL_MS : API_RETRY_MS);
 }
@@ -1278,6 +1344,63 @@ void drawProgress(OLEDDisplay *display, int percentage, String label) {
   display->drawString(64, 10, label);
   display->drawProgressBar(2, 28, 124, 10, percentage);
   display->display();
+}
+
+/**
+ * Desenha a mensagem temporária (título, linha 1 e linha 2) no OLED. A linha 2 quebra em até 2
+ * linhas se for longa.
+ */
+void desenhaMensagemTela() {
+  display.clear();
+  display.setTextAlignment(TEXT_ALIGN_CENTER);
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(64, 0, msgTitulo);
+  display.drawString(64, 14, msgLinha1);
+  String resto = msgLinha2;
+  int y = 28;
+  for (int k = 0; k < 2 && resto.length() > 0; k++) {
+    int corte = resto.length();
+    while (corte > 1 && display.getStringWidth(resto.substring(0, corte)) > 124) corte--;   // cabe na largura da tela
+    display.drawString(64, y, resto.substring(0, corte));
+    resto = resto.substring(corte);
+    y += 12;
+  }
+  display.display();
+}
+
+/**
+ * Mostra uma mensagem de 3 linhas no OLED por 'dur' ms, por cima das telas. Desenha na hora (mesmo
+ * durante um envio demorado) e acende a tela se estiver apagada; ao terminar, a tela volta ao
+ * estado anterior.
+ */
+void mostraMensagemTela(const String& titulo, const String& l1, const String& l2, unsigned long dur) {
+  msgTitulo = titulo;
+  msgLinha1 = l1;
+  msgLinha2 = l2;
+  msgAte = millis() + dur;
+  if (!msgAtiva && !displayLigado) {
+    msgLigouTela = true;                // a tela estava apagada: acende só para a mensagem
+    display.displayOn();
+  }
+  msgAtiva = true;
+  desenhaMensagemTela();
+}
+
+/**
+ * Chamada pelo loop(): mantém a mensagem na tela até o tempo acabar. Devolve true enquanto ela
+ * está ativa (o loop não redesenha as telas nesse período).
+ */
+bool trataMensagemTela(unsigned long ms) {
+  if (!msgAtiva) return false;
+  if ((long)(ms - msgAte) >= 0) {
+    msgAtiva = false;
+    if (msgLigouTela) {
+      msgLigouTela = false;
+      aplicaDisplay();                  // volta a apagar a tela, se ela estava apagada
+    }
+    return false;
+  }
+  return true;
 }
 
 /** Tela 1 do OLED: dia da semana, data e hora. */
@@ -1492,9 +1615,12 @@ unsigned long telaDuracaoPadraoMs() {
   return (unsigned long)telaTimeoutMin * 60000UL;
 }
 
-/** Chamada pelo loop(): apaga a tela quando a contagem do tempo de tela ligada termina. */
+/**
+ * Chamada pelo loop(): apaga a tela quando a contagem do tempo de tela ligada termina (espera uma
+ * mensagem temporária acabar, se houver).
+ */
 void verificaTimerTela(unsigned long ms) {
-  if (telaContando && displayLigado && (long)(ms - telaDesligaEm) >= 0) {
+  if (telaContando && displayLigado && !msgAtiva && (long)(ms - telaDesligaEm) >= 0) {
     telaContando = false;
     telaAcordadaNoite = false;
     displayLigado = false;              // não salva na EEPROM (evita desgaste); o botão acende de novo

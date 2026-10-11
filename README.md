@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-2.6-success)
+![Versão](https://img.shields.io/badge/firmware-2.7-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -50,7 +50,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 **Interface**
 - Display OLED 0,96" com **6 telas** animadas e barra inferior com hora e temperatura externa.
-- **Dois botões físicos**: um clique no primeiro passa para a próxima tela, e segurando por 8 s ele apaga só o WiFi salvo; o segundo botão faz o **reset geral** (apaga o WiFi e todos os ajustes) ao ser segurado por 10 s.
+- **Dois botões físicos**: um clique no primeiro passa para a próxima tela, e segurando por 8 s ele apaga só o WiFi salvo; o segundo botão **envia os dados ao painel** com um clique (mostrando o resultado no OLED) e faz o **reset geral** (apaga o WiFi e todos os ajustes) ao ser segurado por 10 s.
 - **Tempo de cada tela** configurável na página (5 a 30 s, de 5 em 5).
 - **Tempo de tela ligada** (sempre ligada, 1, 5, 10, 15, 30 ou 60 min): depois desse tempo a tela apaga sozinha para economizar bateria. Um clique no botão acende; no horário agendado como desligado, o clique acende a tela por 10 s.
 - **Página web responsiva** (celular e computador): clima, cartões, bússola de vento, anel de umidade, previsão, gráfico com eixos e seleção de ponto, ícones de configurações, tela, sinal WiFi e bateria.
@@ -206,10 +206,11 @@ Ligue cada botão de pressão **entre o pino e o GND**. Não precisa de resistor
 | **Das telas** | **D7** (GPIO13) | Clique | Próxima tela do OLED. Com a tela apagada, o clique só liga a tela |
 | | | Segurar 3 s | Aparece "Apagando o WiFi..." com barra de progresso e o LED pisca rápido. Soltar cancela |
 | | | Segurar 8 s | Apaga **só a rede WiFi salva** e reinicia. Na volta, abre o portal `ESP_WeatherStation` |
-| **Reset geral** | **D6** (GPIO12); na variante B, **D1** | Segurar 3 s | Aparece "RESET GERAL - Apaga WiFi e ajustes" com barra de progresso e o LED pisca rápido. Soltar cancela |
+| **Reset geral / envio** | **D6** (GPIO12); na variante B, **D1** | Clique | **Envia uma leitura ao painel agora** (igual ao botão "Enviar dados agora" da `/config`). O OLED mostra "Enviando..." e depois "Enviado com sucesso" ou "Falha no envio" com o **código HTTP** (ex.: `HTTP 200`) ou o erro, por 3,5 s. Se a tela estiver apagada, ela acende só para mostrar o resultado |
+| | | Segurar 3 s | Aparece "RESET GERAL - Apaga WiFi e ajustes" com barra de progresso e o LED pisca rápido. Soltar cancela |
 | | | Segurar 10 s | Apaga o **WiFi e todos os ajustes salvos** (chave do OpenWeatherMap, cidade, idioma, fuso, agenda, bateria, ID/URL/`DEVICE_KEY` do painel e tempo das telas) e reinicia no padrão do código |
 
-Um toque rápido no botão de reset geral não faz nada: é preciso segurar. Se não quiser esse botão, defina `PIN_BOTAO_RESET` como `-1`; o botão das telas continua apagando o WiFi ao ser segurado.
+O clique rápido no segundo botão **só envia os dados**; para o reset é preciso segurar por 10 s, com aviso na tela, e soltar antes cancela. Se não quiser esse botão, defina `PIN_BOTAO_RESET` como `-1`; o botão das telas continua apagando o WiFi ao ser segurado.
 
 Evite D0, D3, D4 e D8 (pinos de boot e LED) e os pinos do display e do sensor.
 
@@ -380,7 +381,7 @@ O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe
 curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   -H "Content-Type: application/json" \
   -H "x-device-key: SUA_DEVICE_KEY" \
-  -d '{"device_id":"esp8266-sala","temperature":25.3,"humidity":58.2,"ip":"192.168.0.50","rssi":-62,"city_id":3448439,"city_name":"São Paulo","firmware":"2.6","battery_active":true,"battery":85,"battery_voltage":3.92}'
+  -d '{"device_id":"esp8266-sala","temperature":25.3,"humidity":58.2,"ip":"192.168.0.50","rssi":-62,"city_id":3448439,"city_name":"São Paulo","firmware":"2.7","battery_active":true,"battery":85,"battery_voltage":3.92}'
 ```
 
 > O ESP usa **HTTPS sem validar o certificado** (`setInsecure()`), com buffer de 1024 bytes (`API_TLS_RX_BUF`). Se a conexão falhar por falta de memória, aumente esse valor ou veja a aba **Sistema**.
@@ -450,6 +451,7 @@ As principais constantes ficam no topo do `WeatherStation.ino`:
 | `PIN_BOTAO_TELA` | Pino do botão das telas (padrão `D7`), no bloco da placa |
 | `PIN_BOTAO_RESET` | Pino do botão de reset geral (`D6` na placa comum, `D1` na com OLED integrado; `-1` desativa), no bloco da placa |
 | `TELA_ACORDAR_NOITE_MS` | Quanto tempo a tela fica acesa ao apertar o botão no horário agendado como desligado (10 s) |
+| `TELA_MENSAGEM_MS` | Quanto tempo o resultado do envio pelo botão fica no OLED (3,5 s) |
 | `BOTAO_AVISO_MS`, `BOTAO_RESET_MS`, `BOTAO_RESET_GERAL_MS` | Tempo segurando para mostrar o aviso (3 s), apagar só o WiFi (8 s, botão das telas) e fazer o reset geral (10 s) |
 | `BATERIA_ATIVA_PADRAO` | Padrão de fábrica da bateria (muda em `/config`) |
 | `BAT_FATOR`, `BAT_CALIB` | Divisor e calibração da bateria |
@@ -517,6 +519,7 @@ O `WeatherStation.ino` é um arquivo único, dividido em seções numeradas. Tod
 | **Hora errada** | Fuso e horário de verão na aba Clima; aguarde a sincronização NTP |
 | **Porcentagem da bateria estranha** | Calibre `BAT_CALIB` com multímetro e confira o divisor |
 | **OTA não aparece** | PC e ESP na mesma rede; reinicie a IDE; confira o firewall |
+| **Tela preta depois de conectar ao WiFi** | Falta a chave do OpenWeatherMap (placa nova ou depois de um reset geral). No boot o OLED mostra "Sem chave da API" com o endereço da `/config`; informe a chave na aba Clima |
 | **A tela apaga sozinha** | É o **tempo de tela ligada** (`/config` → Tela). Aperte o botão das telas uma vez para acender; escolha "Sempre ligada" para desativar |
 | **Erro "Escolha apenas UMA placa" ou "Nenhuma placa selecionada"** | Deixe sem comentário só uma das linhas `PLACA_...` na seção 2 do código |
 | **Botão não responde** | Ligue entre o pino e o GND (D7 para as telas, D6 para o reset geral); confira `PIN_BOTAO_TELA` e `PIN_BOTAO_RESET`; cliques durante o envio à API ou a atualização do clima podem ser perdidos |
@@ -551,6 +554,7 @@ WeatherStation/
 | **2.4** | Botão **Reset geral** na `/config` (aba Sistema), com confirmação |
 | **2.5** | **Tempo de tela ligada** (apaga sozinha; o clique acende, 10 s no horário desligado) |
 | **2.6** | Código reorganizado em seções comentadas e **seleção de placa por uma linha** (ESP8266 comum ou NodeMCU com OLED integrado) |
+| **2.7** | Clique no botão de reset geral envia os dados ao painel e mostra o resultado no OLED; aviso no boot quando falta a chave da API (sem tela preta) |
 
 ---
 
