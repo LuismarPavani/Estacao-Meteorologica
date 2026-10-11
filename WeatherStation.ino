@@ -187,7 +187,7 @@ const int   BAT_AMOSTRAS = 16;
 #define BAT_CRITICA_PCT 10              // abaixo disso: aviso crítico
 
 // ---- Painel web (API REST): URL e DEVICE_KEY também são configuradas em /config -----------
-#define API_URL_PADRAO "https://weatherstation-web.vercel.app/api/readings"   // pode ser trocada em /config
+#define API_URL_PADRAO "https://seu-app.vercel.app/api/readings"   // pode ser trocada em /config
 const unsigned long PAINEL_INTERVAL_MS = 15UL * 60UL * 1000UL;   // envio automático ao painel a cada 15 min
 const unsigned long PAINEL_RETRY_MS    = 2UL * 60UL * 1000UL;    // se o envio falhar, tenta de novo em 2 min
 #define API_TLS_RX_BUF 1024             // buffer de recepção do HTTPS (mesmo valor do WeatherApi.h; aumente se a conexão falhar)
