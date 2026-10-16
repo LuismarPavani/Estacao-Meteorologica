@@ -96,6 +96,7 @@ See more at https://thingpulse.com
 //    Botão das telas         D7  (GPIO13)                D7  (GPIO13)
 //    Botão de reset geral    D6  (GPIO12)                D1  (GPIO5)
 //    Bateria                 A0                          A0
+//    Sensor de energia (UPS) D0  (GPIO16)                D0  (GPIO16)   <- 5 V da entrada da UPS, por divisor 10k/20k
 //    LED de status           GPIO2 (D4) e GPIO16 (D0)    GPIO2 (D4) e GPIO16 (D0)
 //  
 //  Botões: contato entre o pino e o GND (usam o pull-up interno). Evite D0, D3, D4 e D8 (pinos de boot/LED).
@@ -116,6 +117,7 @@ See more at https://thingpulse.com
   #define DHTTYPE          DHT22        // DHT22 (AM2302); use DHT11 se for o sensor mais simples
   #define PIN_BOTAO_TELA   D7           // GPIO13: clique = próxima tela; segurar = apagar o WiFi
   #define PIN_BOTAO_RESET  D6           // GPIO12: botão de reset geral (-1 desativa)
+  #define PIN_ENERGIA      D0           // GPIO16: sensor de energia da placa UPS (-1 desativa); com o D0 aqui, o 2º LED do D0 não é usado
 #elif defined(PLACA_OLED_INTEGRADO)
   // ---- NodeMCU com OLED integrado (SSD1315, compatível com SSD1306) ----
   #define DISPLAY_SDA      D5           // GPIO14
@@ -124,6 +126,7 @@ See more at https://thingpulse.com
   #define DHTTYPE          DHT22        // troque para DHT11 se esse for o sensor ligado
   #define PIN_BOTAO_TELA   D7           // GPIO13
   #define PIN_BOTAO_RESET  D1           // GPIO5 (o D6 é o SCL do display)
+  #define PIN_ENERGIA      D0           // GPIO16: sensor de energia da placa UPS (-1 desativa); com o D0 aqui, o 2º LED do D0 não é usado
 #else
   #error "Nenhuma placa selecionada: descomente PLACA_ESP8266_COMUM ou PLACA_OLED_INTEGRADO."
 #endif
@@ -140,7 +143,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "2.7"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "2.9"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "ESP8266-OTA-"
 
 // ---- Display OLED e sensor ----------------------------------------------------------------
@@ -186,8 +189,16 @@ const int   BAT_AMOSTRAS = 16;
 #define BAT_AVISO_PCT   20              // abaixo disso: aviso de bateria baixa
 #define BAT_CRITICA_PCT 10              // abaixo disso: aviso crítico
 
+// ---- Energia externa (placa UPS): o pino lê, por um divisor de tensão, se há 5 V na ENTRADA da placa 
+// Ligação: entrada de 5 V da UPS (IN+, do carregador/USB) -> resistor 10 kΩ -> PIN_ENERGIA, e PIN_ENERGIA -> resistor 20 kΩ -> GND.
+// NUNCA ligue os 5 V direto no pino (o ESP8266 aceita no máximo 3,3 V) e não use a SAÍDA da UPS: ela tem 5 V também na bateria.
+// Ativar/desativar por ESP: aba Bateria em /config. ENERGIA_ATIVA_EM_ALTO: true = com 5 V o pino lê HIGH; false = lê LOW.
+#define ENERGIA_ATIVA_PADRAO    false   // padrão de fábrica (muda em /config)
+#define ENERGIA_ATIVA_EM_ALTO   true
+const unsigned long ENERGIA_INTERVAL_MS = 200;   // leitura do pino (muda de estado após 3 leituras iguais)
+
 // ---- Painel web (API REST): URL e DEVICE_KEY também são configuradas em /config -----------
-#define API_URL_PADRAO "https://seu-app.vercel.app/api/readings"   // pode ser trocada em /config
+#define API_URL_PADRAO ""               // sem URL o envio ao painel fica desligado; informe em /config → Clima → Painel web
 const unsigned long PAINEL_INTERVAL_MS = 15UL * 60UL * 1000UL;   // envio automático ao painel a cada 15 min
 const unsigned long PAINEL_RETRY_MS    = 2UL * 60UL * 1000UL;    // se o envio falhar, tenta de novo em 2 min
 #define API_TLS_RX_BUF 1024             // buffer de recepção do HTTPS (mesmo valor do WeatherApi.h; aumente se a conexão falhar)
@@ -225,6 +236,8 @@ struct Config {
   char deviceId[33];
   uint8_t telaSeg;                      // segundos de cada tela do OLED (5 a 30)
   uint8_t telaTimeout;                  // tempo de tela ligada em minutos (0 = sempre ligada)
+  uint8_t energiaOk;                    // 0xA5 = escolha do sensor de energia salva
+  uint8_t energia;                      // 1 = este ESP tem o sensor de energia (placa UPS)
 };
 
 // Opção da lista de fusos horários (minutos em relação ao UTC e nome)
@@ -258,6 +271,7 @@ time_t now;
 float localTemp = 0;
 float localHum = 0;
 bool sensorOk = false;                     // true depois da primeira leitura válida
+bool sensorUltimaOk = false;                // true se a última tentativa de leitura deu certo (vai ao painel como sensor_ok)
 unsigned long nextSensorRead = 0;
 int16_t histTemp[HIST_SIZE];            // temperatura x10
 uint16_t histHum[HIST_SIZE];            // umidade x10 (1 casa decimal)
@@ -300,6 +314,13 @@ bool bateriaAtiva = BATERIA_ATIVA_PADRAO;   // escolhido em /config
 float bateriaV = 0;
 int bateriaPct = 0;
 unsigned long nextBateria = 0;
+
+// ---- Energia externa (placa UPS) ----------------------------------------------------------
+bool energiaAtiva = ENERGIA_ATIVA_PADRAO;   // este ESP tem o sensor de energia? (escolhido em /config)
+bool energiaExterna = false;            // true = há 5 V na entrada (energia externa); false = rodando na bateria
+bool energiaUltima = false;             // última leitura bruta do pino (para o filtro)
+uint8_t energiaContagem = 0;            // quantas leituras iguais seguidas
+unsigned long nextEnergia = 0;          // próxima leitura do pino
 
 // ---- Envio ao painel web (API) ------------------------------------------------------------
 String apiUrl = API_URL_PADRAO;
@@ -365,6 +386,10 @@ int bateriaPercentual(float v);
 void atualizaBateria();
 const char* bateriaSituacao(float v);
 
+// ---- ENERGIA EXTERNA (placa UPS) ----------------------------------------------------------
+void energiaLeAgora();
+void atualizaEnergia(unsigned long ms);
+
 // ---- CLIMA (OpenWeatherMap) ---------------------------------------------------------------
 void updateData(OLEDDisplay *display);
 
@@ -384,6 +409,7 @@ void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_
 void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state);
 void drawBateria(OLEDDisplay *display, int x, int y, int pct);
 void drawSinalWiFi(OLEDDisplay *display, int x, int y, int pct);
+void drawTomada(OLEDDisplay *display, int x, int y, bool ligada);
 int getRSSIasQuality(int rssi);
 
 // ---- TELA: TEMPO LIGADA E AGENDA ----------------------------------------------------------
@@ -542,6 +568,7 @@ footer{text-align:center;margin:8px 0 24px}
   </div>
   <div style="display:flex;align-items:center;gap:14px">
     <svg id="wf" width="26" height="18" viewBox="0 0 26 18"><title id="wft">WiFi</title><rect id="w1" x="0" y="12" width="5" height="6" rx="1" fill="#ffffff40"/><rect id="w2" x="7" y="8" width="5" height="10" rx="1" fill="#ffffff40"/><rect id="w3" x="14" y="4" width="5" height="14" rx="1" fill="#ffffff40"/><rect id="w4" x="21" y="0" width="5" height="18" rx="1" fill="#ffffff40"/></svg>
+    <span id="pw" style="display:none;color:#a9c1cf" title="Energia"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/><path id="pwslash" d="M3 3l18 18" stroke="#ef5350" style="display:none"/></svg></span>
     <div id="bat" style="display:none;align-items:center;gap:6px">
       <svg width="34" height="16" viewBox="0 0 34 16"><rect x="1" y="1" width="28" height="14" rx="3.5" fill="none" stroke="#ffffffcc" stroke-width="2"/><rect id="batn" x="4" y="4" width="0" height="8" rx="1.5" fill="#66bb6a"/><rect x="30" y="5" width="3" height="6" rx="1.2" fill="#ffffffcc"/></svg>
       <span id="batp" style="font-size:.9rem;font-weight:500">--%</span>
@@ -603,13 +630,15 @@ async function load(){
     const d=await (await fetch('/json',{cache:'no-store'})).json();
     const e=d.externo,i=d.interno,u=d.unid;
     $('erro').style.display=d.erro?'block':'none';
-    const b=d.bateria;
+    const b=d.bateria,en=d.energia;
+    $('pw').style.display=en==null?'none':'inline-flex';
+    if(en!=null){$('pw').style.color=en?'#66bb6a':'#a9c1cf';$('pwslash').style.display=en?'none':'block';$('pw').title=en?'Energia externa conectada (5 V)':'Sem energia externa: rodando na bateria';}
     $('bat').style.display=b?'flex':'none';
     if(b){
       const p=b.pct,c=p<=10?'#ef5350':(p<=20?'#ffb74d':'#66bb6a'),av=$('bataviso');
       $('batn').setAttribute('width',Math.round(22*p/100));$('batn').setAttribute('fill',c);
       $('batp').textContent=p+'%';$('bat').title=b.v+' V';
-      if(p<=20){av.style.display='block';av.style.background=p<=10?'rgba(239,83,80,.25)':'rgba(255,183,77,.2)';
+      if(p<=20&&en!==true){av.style.display='block';av.style.background=p<=10?'rgba(239,83,80,.25)':'rgba(255,183,77,.2)';
         av.textContent=p<=10?'⚠️ Bateria crítica ('+p+'%). A estação pode desligar a qualquer momento.':'⚠️ Bateria baixa ('+p+'%). Conecte ao carregador.';}
       else av.style.display='none';
     }else $('bataviso').style.display='none';
@@ -722,6 +751,10 @@ void setup() {
   ledInicia();                          // LED de status (apagado até algo acontecer)
   if (PIN_BOTAO_TELA >= 0) pinMode(PIN_BOTAO_TELA, INPUT_PULLUP);
   if (PIN_BOTAO_RESET >= 0) pinMode(PIN_BOTAO_RESET, INPUT_PULLUP);
+  if (PIN_ENERGIA >= 0) {               // sensor de energia da UPS (divisor de tensão no pino)
+    pinMode(PIN_ENERGIA, (PIN_ENERGIA == 16) ? INPUT_PULLDOWN_16 : INPUT);
+    if (energiaAtiva) energiaLeAgora();
+  }
 
   delay(50);
   dht.begin();
@@ -780,7 +813,7 @@ void setup() {
 
   // OTA: permite enviar novo firmware pelo WiFi (Arduino IDE > Porta de rede)
   ArduinoOTA.setHostname(hostname.c_str());
-  ArduinoOTA.setPassword("2258");       // senha pedida pela IDE no envio por rede
+  ArduinoOTA.setPassword("SUA_SENHA");   // TROQUE por uma senha sua antes de gravar: é a senha pedida pela IDE no envio por rede (OTA)
   ArduinoOTA.begin();
 
   currentWeatherClient.setMetric(IS_METRIC);
@@ -843,6 +876,7 @@ void loop() {
   bool segurandoReset = trataBotoes(ms);   // botão físico: clique = próxima tela; segurar = apagar WiFi
   verificaTimerTela(ms);                   // apaga a tela quando o tempo de tela ligada acabar
   bool mostrandoMsg = trataMensagemTela(ms);   // mensagem temporária no OLED (ex.: resultado do envio)
+  atualizaEnergia(ms);                     // sensor de energia da UPS: energia externa conectada ou bateria
 
   // Estado da rede: pisca devagar se o WiFi cair (como em interruptores inteligentes)
   if ((long)(ms - nextRede) >= 0) {
@@ -930,6 +964,7 @@ void carregaConfig() {
     horarioVerao = (c.verao == 1);
   }
   if (c.bateriaOk == 0xA5) bateriaAtiva = (c.bateria == 1);
+  if (c.energiaOk == 0xA5) energiaAtiva = (c.energia == 1);
   if (c.apiOk == 0xA5) {
     c.apiUrl[sizeof(c.apiUrl) - 1] = 0;
     c.deviceKey[sizeof(c.deviceKey) - 1] = 0;
@@ -964,6 +999,8 @@ void salvaConfig() {
   c.verao = horarioVerao ? 1 : 0;
   c.bateriaOk = 0xA5;
   c.bateria = bateriaAtiva ? 1 : 0;
+  c.energiaOk = 0xA5;
+  c.energia = energiaAtiva ? 1 : 0;
   c.apiOk = 0xA5;
   snprintf(c.apiUrl, sizeof(c.apiUrl), "%s", apiUrl.c_str());
   snprintf(c.deviceKey, sizeof(c.deviceKey), "%s", deviceKey.c_str());
@@ -993,10 +1030,13 @@ void aplicaFuso() {
 
 // ---- LED DE STATUS ------------------------------------------------------------------------
 
-/** Acende ou apaga os LEDs azuis da placa (GPIO2 e GPIO16, acesos em nível baixo). */
+/**
+ * Acende ou apaga os LEDs azuis da placa (GPIO2 e, se o D0 não for o sensor de energia, também o
+ * GPIO16; acesos em nível baixo).
+ */
 void ledEscreve(bool aceso) {
   digitalWrite(2, aceso ? LOW : HIGH);  // LED do módulo (GPIO2 = D4), aceso em LOW
-  digitalWrite(16, aceso ? LOW : HIGH); // 2º LED de algumas NodeMCU (GPIO16 = D0)
+  if (PIN_ENERGIA != 16) digitalWrite(16, aceso ? LOW : HIGH);   // 2º LED de algumas NodeMCU (GPIO16 = D0); não usado se o D0 for o sensor de energia
 }
 
 /**
@@ -1023,7 +1063,7 @@ void ledTick() {
 /** Configura os pinos do LED, apaga o LED e inicia o Ticker que faz os padrões de piscada. */
 void ledInicia() {
   pinMode(2, OUTPUT);
-  pinMode(16, OUTPUT);
+  if (PIN_ENERGIA != 16) pinMode(16, OUTPUT);
   ledEscreve(false);
   ledTicker.attach_ms(100, ledTick);
 }
@@ -1195,19 +1235,21 @@ void varreduraI2C() {
 }
 
 /**
- * Lê temperatura e umidade do DHT e ignora leituras inválidas (mantém o último valor bom). Chamada
- * a cada SENSOR_INTERVAL_MS.
+ * Lê temperatura e umidade do DHT e ignora leituras inválidas (mantém o último valor bom).
+ * Registra se a última tentativa deu certo (sensorUltimaOk). Chamada a cada SENSOR_INTERVAL_MS.
  */
 void leSensor() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(h) || isnan(t)) {
     Serial.println("Falhou a leitura do sensor DHT22!");
+    sensorUltimaOk = false;             // o painel é avisado pelo campo sensor_ok
     return;                             // mantém o último valor válido
   }
   localTemp = t;
   localHum = h;
   sensorOk = true;
+  sensorUltimaOk = true;
 }
 
 /**
@@ -1276,6 +1318,42 @@ const char* bateriaSituacao(float v) {
   if (v >= 3.39) return "Nível crítico (recomenda-se recarregar)";
   if (v >= 3.20) return "Muito baixa";
   return "Descarga profunda (risco de danificar a célula)";
+}
+
+// ---- ENERGIA EXTERNA (placa UPS) ----------------------------------------------------------
+
+/**
+ * Lê o pino do sensor de energia agora (sem filtro) e atualiza energiaExterna. Usada ao ligar e ao
+ * ativar o sensor em /config.
+ */
+void energiaLeAgora() {
+  if (PIN_ENERGIA < 0) return;
+  bool presente = (digitalRead(PIN_ENERGIA) == (ENERGIA_ATIVA_EM_ALTO ? HIGH : LOW));
+  energiaExterna = presente;
+  energiaUltima = presente;
+  energiaContagem = 3;                  // já considera estável
+}
+
+/**
+ * Chamada a cada volta do loop(): lê o pino a cada ENERGIA_INTERVAL_MS e só muda o estado depois
+ * de 3 leituras iguais seguidas (filtro de ruído). energiaExterna = true quando há 5 V na entrada
+ * da UPS.
+ */
+void atualizaEnergia(unsigned long ms) {
+  if (!energiaAtiva || PIN_ENERGIA < 0) return;
+  if ((long)(ms - nextEnergia) < 0) return;
+  nextEnergia = ms + ENERGIA_INTERVAL_MS;
+  bool presente = (digitalRead(PIN_ENERGIA) == (ENERGIA_ATIVA_EM_ALTO ? HIGH : LOW));
+  if (presente == energiaUltima) {
+    if (energiaContagem < 255) energiaContagem++;
+  } else {
+    energiaUltima = presente;
+    energiaContagem = 0;
+  }
+  if (energiaContagem >= 3 && presente != energiaExterna) {
+    energiaExterna = presente;
+    Serial.println(presente ? "Energia externa conectada (5 V)" : "Sem energia externa: rodando na bateria");
+  }
 }
 
 // ---- CLIMA (OpenWeatherMap) ---------------------------------------------------------------
@@ -1508,7 +1586,10 @@ void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
   display->setTextAlignment(TEXT_ALIGN_LEFT);
 }
 
-/** Tela 6 do OLED: bateria, sinal do WiFi (ícone, dBm e %), nome da rede (SSID) e IP. */
+/**
+ * Tela 6 do OLED: bateria (com a tomada indicando energia externa), sinal do WiFi (ícone, dBm e
+ * %), nome da rede (SSID) e IP.
+ */
 void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   char aux[48];
   int32_t rssi = WiFi.RSSI();
@@ -1523,6 +1604,7 @@ void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_
   } else {
     display->drawString(x, y, "Bateria: desativada");
   }
+  if (energiaAtiva && PIN_ENERGIA >= 0) drawTomada(display, x + 112, y, energiaExterna);   // tomada: energia externa conectada ou não
 
   // Linha 2: potência do sinal (ícone + dBm + %)
   if (WiFi.status() == WL_CONNECTED) {
@@ -1586,6 +1668,19 @@ void drawSinalWiFi(OLEDDisplay *display, int x, int y, int pct) {
     if (k < n) display->fillRect(bx, by, 3, h);
     else display->drawRect(bx, by, 3, h);
   }
+}
+
+/**
+ * Desenha o ícone de tomada no OLED (12x10 px): cheio = energia externa conectada; só contorno e
+ * riscado = sem energia externa (rodando na bateria).
+ */
+void drawTomada(OLEDDisplay *display, int x, int y, bool ligada) {
+  display->fillRect(x + 3, y, 1, 3);            // pino esquerdo
+  display->fillRect(x + 8, y, 1, 3);            // pino direito
+  if (ligada) display->fillRect(x + 1, y + 3, 10, 4);   // corpo cheio
+  else display->drawRect(x + 1, y + 3, 10, 4);          // corpo vazio
+  display->fillRect(x + 5, y + 7, 2, 3);        // cabo
+  if (!ligada) display->drawLine(x, y + 9, x + 11, y);  // risco: sem energia
 }
 
 /** Converte o sinal em dBm para qualidade de 0 a 100%. */
@@ -1698,30 +1793,51 @@ String idDispositivo() {
 }
 
 /**
- * Monta o corpo JSON enviado à API do painel. Todos os campos ficam aqui, fáceis de ajustar. O
- * horário não vai no corpo: o servidor registra a hora em que recebe.
+ * Monta o corpo JSON enviado à API do painel (20 campos: leitura, rede, cidade, bateria, energia
+ * externa e saúde do ESP). Todos os campos ficam aqui, fáceis de ajustar. O horário não vai no
+ * corpo: o servidor registra a hora em que recebe.
  */
 String montaPayloadApi() {
-  String j;
-  j.reserve(360);
-  j += "{\"device_id\":\"" + jsonEscape(idDispositivo()) + "\"";
-  j += ",\"temperature\":" + String(localTemp, 1);
-  j += ",\"humidity\":" + String(localHum, 1);
-  j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
-  j += ",\"rssi\":" + String(WiFi.RSSI());
+  int rssi = WiFi.RSSI();
+  String chip = String(ESP.getChipId(), HEX);
+  chip.toUpperCase();
   String cid = OPEN_WEATHER_MAP_LOCATION_ID;           // código da cidade (OpenWeatherMap), enviado como número
   bool soDigitos = cid.length() > 0;
   for (size_t k = 0; k < cid.length(); k++) {
     if (!isDigit(cid[k])) soDigitos = false;
   }
+
+  String j;
+  j.reserve(800);
+  // ---- campos principais ----
+  j += "{\"device_id\":\"" + jsonEscape(idDispositivo()) + "\"";
+  j += ",\"temperature\":" + String(localTemp, 1);
+  j += ",\"humidity\":" + String(localHum, 1);
   j += ",\"city_id\":";
   j += soDigitos ? cid : String("null");
   j += ",\"city_name\":\"" + jsonEscape(currentWeather.cityName) + "\"";
+  j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  j += ",\"rssi\":" + String(rssi);
   j += ",\"firmware\":\"" FIRMWARE_VERSAO "\"";
+  // ---- bateria ----
   j += ",\"battery_active\":";
   j += bateriaAtiva ? "true" : "false";
   j += ",\"battery\":" + String(bateriaAtiva ? bateriaPct : 0);
   j += ",\"battery_voltage\":" + String(bateriaAtiva ? bateriaV : 0.0f, 2);
+  // ---- energia, sensor e saúde do ESP ----
+  j += ",\"external_power\":";                 // true = energia externa (5 V); false = bateria; null = ESP sem o sensor
+  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? "true" : "false";
+  else j += "null";
+  j += ",\"sensor_ok\":";                      // false = a última leitura do sensor falhou (temperature/humidity repetem o último valor)
+  j += sensorUltimaOk ? "true" : "false";
+  j += ",\"uptime_s\":" + String(millis() / 1000UL);
+  j += ",\"reset_reason\":\"" + jsonEscape(ESP.getResetReason()) + "\"";
+  j += ",\"free_heap\":" + String(ESP.getFreeHeap());
+  j += ",\"chip_id\":\"" + chip + "\"";
+  j += ",\"send_interval_s\":" + String(PAINEL_INTERVAL_MS / 1000UL);
+  j += ",\"display_on\":";
+  j += displayLigado ? "true" : "false";
+  j += ",\"rssi_pct\":" + String(getRSSIasQuality(rssi));
   j += "}";
   return j;
 }
@@ -1741,10 +1857,6 @@ bool enviaParaApiInterno() {
   }
   if (WiFi.status() != WL_CONNECTED) {
     apiUltimoMsg = "Sem WiFi";
-    return false;
-  }
-  if (!sensorOk) {
-    apiUltimoMsg = "Sensor DHT22 sem leitura válida";
     return false;
   }
 
@@ -1900,6 +2012,9 @@ void paginaJson() {
   j += ",\"bateria\":";
   if (bateriaAtiva) j += "{\"v\":" + String(bateriaV, 2) + ",\"pct\":" + String(bateriaPct) + "}";
   else j += "null";
+  j += ",\"energia\":";                 // true = energia externa (5 V) conectada; false = bateria; null = sem sensor
+  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? "true" : "false";
+  else j += "null";
   j += ",\"interno\":{";
   if (sensorOk) {
     j += "\"temp\":" + String(localTemp, 1) + ",\"umid\":" + String(localHum, 1);
@@ -1990,6 +2105,7 @@ String iconeBateria(int pct) {
 /** Tabela HTML da aba Bateria: carga, tensão, estado e situação. */
 String tabelaBateria() {
   String t = "<table>";
+  if (energiaAtiva && PIN_ENERGIA >= 0) t += linhaInfo("Alimentação", energiaExterna ? "🔌 Energia externa (5 V conectada)" : "🔋 Bateria (sem energia externa)");
   if (!bateriaAtiva) {
     t += linhaInfo("Estado", "Desativada (ative na aba Bateria)");
   } else {
@@ -2090,7 +2206,7 @@ String tabelaSistema() {
   t += linhaInfo("Maior bloco livre", String(ESP.getMaxFreeBlockSize()) + " bytes");
   t += linhaInfo("Fragmentação do heap", String(ESP.getHeapFragmentation()) + "%");
   t += linhaInfo("Firmware", FIRMWARE_VERSAO);
-  t += linhaInfo("Sensor DHT22", sensorOk ? "OK" : "sem leitura válida (confira o dado no pino D5)");
+  t += linhaInfo("Sensor DHT22", sensorUltimaOk ? "OK" : "sem leitura válida (confira o dado no pino D5)");
   t += linhaInfo("Core ESP8266", htmlEsc(ESP.getCoreVersion()));
   t += linhaInfo("SDK", htmlEsc(String(ESP.getSdkVersion())));
   t += linhaInfo("Compilado em", String(__DATE__) + " " + String(__TIME__));
@@ -2295,8 +2411,13 @@ void paginaConfig() {
     h += "> Este ESP tem bateria (leitura no A0)</label>"
          "<div class=\"mut\">Desmarcado, a leitura, o ícone e os avisos de bateria ficam desligados. "
          "Marque só se a bateria estiver ligada ao A0 pelo divisor de tensão.</div>"
+         "<label><input type=\"checkbox\" name=\"energia\" value=\"1\"";
+    if (energiaAtiva) h += " checked";
+    h += "> Este ESP tem a placa UPS (sensor de energia)</label>"
+         "<div class=\"mut\">Mostra se a energia externa (5 V) está conectada ou se está rodando na bateria. "
+         "Marque só se a entrada de 5 V da UPS estiver ligada ao pino de energia pelo divisor de tensão (veja o README).</div>"
          "<button type=\"submit\">Salvar</button></form>";
-    if (bateriaAtiva) h += tabelaBateria();
+    if (bateriaAtiva || energiaAtiva) h += tabelaBateria();
 
   } else if (aba == "wifi") {
     // ---------- Aba WiFi: dados da conexão e ações ----------
@@ -2460,7 +2581,10 @@ void handleTempoTela() {
   redirecionaConfig("tempo");
 }
 
-/** POST /bateria: liga ou desliga a leitura da bateria (A0) neste ESP. */
+/**
+ * POST /bateria: liga ou desliga, neste ESP, a leitura da bateria (A0) e o sensor de energia
+ * externa da placa UPS.
+ */
 void handleBateria() {
   bateriaAtiva = server.hasArg("ativa");
   if (bateriaAtiva) {
@@ -2468,6 +2592,8 @@ void handleBateria() {
     atualizaBateria();
     nextBateria = millis() + 30000UL;
   }
+  energiaAtiva = server.hasArg("energia");
+  if (energiaAtiva) energiaLeAgora();    // já mostra o estado atual da energia
   salvaConfig();
   redirecionaConfig("bat");
 }

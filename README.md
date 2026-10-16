@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-2.7-success)
+![Versão](https://img.shields.io/badge/firmware-2.9-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -53,6 +53,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 - **Dois botões físicos**: um clique no primeiro passa para a próxima tela, e segurando por 8 s ele apaga só o WiFi salvo; o segundo botão **envia os dados ao painel** com um clique (mostrando o resultado no OLED) e faz o **reset geral** (apaga o WiFi e todos os ajustes) ao ser segurado por 10 s.
 - **Tempo de cada tela** configurável na página (5 a 30 s, de 5 em 5).
 - **Tempo de tela ligada** (sempre ligada, 1, 5, 10, 15, 30 ou 60 min): depois desse tempo a tela apaga sozinha para economizar bateria. Um clique no botão acende; no horário agendado como desligado, o clique acende a tela por 10 s.
+- **Placa UPS (nobreak)**: sensor opcional de **energia externa**. Um ícone de tomada, no OLED e na página, mostra se o ESP está ligado na tomada (5 V) ou rodando na bateria.
 - **Página web responsiva** (celular e computador): clima, cartões, bússola de vento, anel de umidade, previsão, gráfico com eixos e seleção de ponto, ícones de configurações, tela, sinal WiFi e bateria.
 - Tema escuro, sem dependência de internet para exibir a página (tudo embutido no ESP).
 
@@ -108,11 +109,13 @@ As telas deslizam automaticamente (padrão: **5 s** cada, ajustável de 5 a 30 s
 Tela 6, na ordem das linhas:
 
 ```
-[▮▮▮▯] 85%  3.92V        1. bateria (ícone, percentual e tensão)
+[▮▮▮▯] 85%  3.92V   🔌   1. bateria (ícone, percentual e tensão) e tomada (energia externa)
 ▂▄▆█   -62dBm  76%       2. sinal do WiFi (ícone de barras, dBm e %)
 SSID: MinhaRede          3. nome da rede
 IP: 192.168.0.50         4. IP (use no navegador)
 ```
+
+Com a placa UPS ativada, a **tomada** aparece no canto direito da linha da bateria: **cheia** = energia externa conectada; **só contorno e riscada** = sem energia externa (rodando na bateria).
 
 O ícone de sinal tem 4 barras: 75% ou mais enche as 4, 50% as 3, 25% as 2 e qualquer sinal acende 1. Sem WiFi, as barras ficam vazias e aparece "sem WiFi".
 
@@ -122,7 +125,7 @@ O ícone de sinal tem 4 barras: 75% ou mais enche as 4, 50% as 3, 25% as 2 e qua
 
 Abra `http://IP-DO-ESP/` (o IP aparece na tela 6 do OLED).
 
-**Barra superior:** engrenagem (abre a `/config`), botão de **ligar/apagar a tela** (com risca vermelha quando apagada), **sinal de WiFi** (4 barras, com dBm e % ao passar o mouse) e **bateria** (ícone com percentual, só se ativada).
+**Barra superior:** engrenagem (abre a `/config`), botão de **ligar/apagar a tela** (com risca vermelha quando apagada), **sinal de WiFi** (4 barras, com dBm e % ao passar o mouse), **tomada** (verde = energia externa conectada; riscada = rodando na bateria; só se o sensor estiver ativado) e **bateria** (ícone com percentual, só se ativada). Com energia externa conectada, o aviso de bateria baixa não aparece.
 
 **Avisos:** faixa amarela de bateria baixa (≤ 20%), vermelha de bateria crítica (≤ 10%) e aviso quando não for possível obter o clima.
 
@@ -145,6 +148,8 @@ Abra `http://IP-DO-ESP/` (o IP aparece na tela 6 do OLED).
 | *(opcional)* Bateria Li-ion 18650 | Com módulo de carga/proteção (ex.: TP4056 com proteção) |
 | *(opcional)* Resistor 100 kΩ | Divisor para ler a bateria no A0 |
 | 2 botões de pressão (normalmente abertos) | Um passa as telas e apaga o WiFi; o outro faz o reset geral |
+| *(opcional)* Placa UPS (módulo carregador + elevador 5 V para Li-ion) | Funciona como nobreak |
+| *(opcional)* Resistores 10 kΩ e 20 kΩ | Divisor de tensão do sensor de energia |
 | Jumpers e protoboard | |
 
 ---
@@ -161,6 +166,7 @@ Abra `http://IP-DO-ESP/` (o IP aparece na tela 6 do OLED).
 | DHT22 dado | **D5** (GPIO14) |
 | DHT22 VCC / GND | 3V3 / GND |
 | Bateria (via divisor) | **A0** |
+| Sensor de energia (placa UPS, via divisor) | **D0** (GPIO16) |
 | LED azul (status) | interno (GPIO2 = D4; em algumas NodeMCU também GPIO16 = D0) |
 | Botão das telas / apagar WiFi | **D7** (GPIO13) → GND |
 | Botão de reset geral | **D6** (GPIO12) → GND (na variante B use o **D1**) |
@@ -215,6 +221,25 @@ O clique rápido no segundo botão **só envia os dados**; para o reset é preci
 Evite D0, D3, D4 e D8 (pinos de boot e LED) e os pinos do display e do sensor.
 
 > A leitura dos botões acontece no laço principal. Cliques durante o envio à API ou a atualização do clima (alguns segundos) podem ser perdidos.
+
+### Sensor de energia (placa UPS)
+
+Com uma placa UPS (carregador + elevador 5 V para Li-ion) o ESP funciona como um nobreak. Para saber se há energia externa, o **D0 (GPIO16)** lê se existe 5 V na **entrada** da UPS, por um divisor de tensão:
+
+```
+Entrada 5 V da UPS (IN+, do carregador/USB) ──[ 10 kΩ ]──┬── D0 (GPIO16)
+                                                          │
+                                                       [ 20 kΩ ]
+                                                          │
+GND (comum com o ESP) ────────────────────────────────────┘
+```
+
+- O divisor reduz 5 V para cerca de 3,3 V, que o pino aguenta. **Nunca ligue os 5 V direto no pino.**
+- Meça a **entrada** da UPS (IN+), não a saída: a saída tem 5 V também quando roda na bateria.
+- O GND da UPS e o do ESP precisam ser o mesmo.
+- Ative em `/config` → **Bateria** → "Este ESP tem a placa UPS (sensor de energia)". Desmarcado, o ícone não aparece (útil para ESPs sem UPS).
+- Se o ícone estiver invertido (sensor com lógica contrária), troque `ENERGIA_ATIVA_EM_ALTO` para `false`.
+- Com o D0 usado como sensor, o **segundo LED do D0** (que algumas NodeMCU têm) deixa de ser usado no LED de status. O LED do módulo, no D4, continua. Se a sua placa tem LED no D0 e ele ficar levemente aceso, use `PIN_ENERGIA = -1` ou o pino de outra placa.
 
 ### Bateria no A0
 
@@ -284,7 +309,7 @@ A página é dividida em **abas**; cada ação salva volta para a aba certa com 
 |---|---|
 | **Clima** | Chave da API, ID da cidade, idioma (7 opções), fuso horário (34 opções) e horário de verão; seção **Painel web (API)** com ID do dispositivo, URL da API, `DEVICE_KEY`, botão **Enviar dados agora**, resultado do último envio e cidade enviada |
 | **Tela** | Ligar/apagar o display, **tempo de cada tela** (5 a 30 s, de 5 em 5), **tempo de tela ligada** (sempre ligada ou 1, 5, 10, 15, 30, 60 min) e **horário automático** (ligar às / apagar às; aceita janela que passa da meia-noite) |
-| **Bateria** | Ativar/desativar a leitura (por dispositivo) e estado: carga, tensão e situação |
+| **Bateria** | Ativar/desativar a leitura da bateria e o sensor de energia da UPS (por dispositivo); estado: alimentação (energia externa ou bateria), carga, tensão e situação |
 | **WiFi** | Dados da conexão com ícone de sinal, abrir o portal de configuração e apagar a rede salva |
 | **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), chip, CPU, flash, programa, memória, firmware, versão do core, sensor e o botão **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
 
@@ -321,7 +346,7 @@ O percentual é uma **estimativa pela tensão**: cai sob carga e varia com a tem
 
 ## 💡 LED de status
 
-O LED azul (GPIO2 e, quando existir, GPIO16) indica o estado sem travar o programa (usa `Ticker`):
+O LED azul (GPIO2 e, se o D0 não for o sensor de energia, também o GPIO16) indica o estado sem travar o programa (usa `Ticker`):
 
 | Situação | LED |
 |---|---|
@@ -357,23 +382,32 @@ O ESP envia uma leitura por `POST` a cada 15 min, e também ao clicar em **Envia
 | Sucesso | HTTP `2xx` (o painel de referência responde `200`) |
 | Falha | o ESP tenta de novo em 2 min e mostra o erro na `/config` |
 
-**Corpo (JSON)**
+**Corpo (JSON), 20 campos**
 
-| Campo | Tipo | Descrição |
-|---|---|---|
-| `device_id` | texto | ID do dispositivo |
-| `temperature` | número | °C, 1 casa decimal |
-| `humidity` | número | %, 1 casa decimal |
-| `ip` | texto | IP local do ESP |
-| `rssi` | inteiro | sinal do WiFi em dBm |
-| `city_id` | inteiro ou `null` | código da cidade no OpenWeatherMap |
-| `city_name` | texto | nome da cidade devolvido pelo OpenWeatherMap |
-| `firmware` | texto | versão do firmware (`FIRMWARE_VERSAO`) |
-| `battery_active` | booleano | bateria ativada neste ESP |
-| `battery` | inteiro | percentual (0 se desativada) |
-| `battery_voltage` | número | tensão em V (0.00 se desativada) |
+| # | Campo | Tipo | Aceita `null` | Descrição |
+|---|---|---|---|---|
+| 1 | `device_id` | texto | não | ID do dispositivo (até 32 caracteres) |
+| 2 | `temperature` | número | não | °C, 1 casa decimal |
+| 3 | `humidity` | número | não | %, 1 casa decimal |
+| 4 | `city_id` | inteiro | **sim** | código da cidade no OpenWeatherMap |
+| 5 | `city_name` | texto | não | nome da cidade devolvido pelo OpenWeatherMap (pode vir vazio) |
+| 6 | `ip` | texto | não | IP local do ESP |
+| 7 | `rssi` | inteiro | não | sinal do WiFi em dBm |
+| 8 | `firmware` | texto | não | versão do firmware (`FIRMWARE_VERSAO`) |
+| 9 | `battery_active` | booleano | não | bateria ativada neste ESP |
+| 10 | `battery` | inteiro | não | percentual (0 se desativada) |
+| 11 | `battery_voltage` | número | não | tensão em V, 2 casas (0.00 se desativada) |
+| 12 | `external_power` | booleano | **sim** | `true` = energia externa (5 V); `false` = rodando na bateria; `null` = ESP sem o sensor da UPS |
+| 13 | `sensor_ok` | booleano | não | `false` = a última leitura do sensor falhou (nesse caso `temperature` e `humidity` repetem o último valor bom, ou `0.0` se nunca leu) |
+| 14 | `uptime_s` | inteiro | não | segundos desde o último boot (zera a cada ~49 dias) |
+| 15 | `reset_reason` | texto | não | motivo do último reinício (`"Power on"`, `"Hardware Watchdog"`, `"Exception"`, `"Software/System restart"`...) |
+| 16 | `free_heap` | inteiro | não | memória livre em bytes (medida antes de abrir a conexão HTTPS) |
+| 17 | `chip_id` | texto | não | ID do chip em hexadecimal maiúsculo |
+| 18 | `send_interval_s` | inteiro | não | segundos entre envios automáticos (`PAINEL_INTERVAL_MS`), para o painel detectar "offline" |
+| 19 | `display_on` | booleano | não | tela do OLED acesa |
+| 20 | `rssi_pct` | inteiro | não | qualidade do sinal, de 0 a 100% |
 
-O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe.
+O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe. O servidor deve aceitar os campos de 12 a 20 como **opcionais**, para continuar recebendo de ESPs com firmware antigo. O corpo tem cerca de 400 bytes. O ESP envia mesmo com o sensor sem leitura (com `sensor_ok: false`), para o painel poder alertar o defeito.
 
 **Exemplo**
 
@@ -381,7 +415,7 @@ O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe
 curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   -H "Content-Type: application/json" \
   -H "x-device-key: SUA_DEVICE_KEY" \
-  -d '{"device_id":"esp8266-sala","temperature":25.3,"humidity":58.2,"ip":"192.168.0.50","rssi":-62,"city_id":3448439,"city_name":"São Paulo","firmware":"2.7","battery_active":true,"battery":85,"battery_voltage":3.92}'
+  -d '{"device_id":"esp8266-sala","temperature":24.5,"humidity":61.3,"city_id":3448439,"city_name":"São Paulo","ip":"192.168.0.50","rssi":-62,"firmware":"2.9","battery_active":true,"battery":83,"battery_voltage":4.02,"external_power":false,"sensor_ok":true,"uptime_s":86400,"reset_reason":"Power on","free_heap":24120,"chip_id":"A1B2C3","send_interval_s":900,"display_on":true,"rssi_pct":76}'
 ```
 
 > O ESP usa **HTTPS sem validar o certificado** (`setInsecure()`), com buffer de 1024 bytes (`API_TLS_RX_BUF`). Se a conexão falhar por falta de memória, aumente esse valor ou veja a aba **Sistema**.
@@ -416,6 +450,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   "erro": false,
   "display": true,
   "bateria": { "v": 3.92, "pct": 85 },
+  "energia": true,
   "interno": { "temp": 25.3, "umid": 58.2 },
   "externo": {
     "cidade": "São Paulo", "desc": "céu limpo", "icone": "01d",
@@ -450,6 +485,9 @@ As principais constantes ficam no topo do `WeatherStation.ino`:
 | `LED_STATUS_ATIVO` | Liga/desliga o LED de status |
 | `PIN_BOTAO_TELA` | Pino do botão das telas (padrão `D7`), no bloco da placa |
 | `PIN_BOTAO_RESET` | Pino do botão de reset geral (`D6` na placa comum, `D1` na com OLED integrado; `-1` desativa), no bloco da placa |
+| `PIN_ENERGIA` | Pino do sensor de energia da UPS (`D0`; `-1` desativa), no bloco da placa |
+| `ENERGIA_ATIVA_EM_ALTO` | `true` = com 5 V o pino lê HIGH; `false` = sensor invertido |
+| `ENERGIA_ATIVA_PADRAO` | Padrão de fábrica do sensor de energia (muda em `/config`) |
 | `TELA_ACORDAR_NOITE_MS` | Quanto tempo a tela fica acesa ao apertar o botão no horário agendado como desligado (10 s) |
 | `TELA_MENSAGEM_MS` | Quanto tempo o resultado do envio pelo botão fica no OLED (3,5 s) |
 | `BOTAO_AVISO_MS`, `BOTAO_RESET_MS`, `BOTAO_RESET_GERAL_MS` | Tempo segurando para mostrar o aviso (3 s), apagar só o WiFi (8 s, botão das telas) e fazer o reset geral (10 s) |
@@ -496,7 +534,7 @@ O `WeatherStation.ino` é um arquivo único, dividido em seções numeradas. Tod
 
 ## 🔐 Segurança
 
-- **Senha do OTA:** defina a sua em `ArduinoOTA.setPassword("...")`. Sem senha, qualquer pessoa na rede pode enviar firmware para o ESP.
+- **Senha do OTA:** o código traz `ArduinoOTA.setPassword("SUA_SENHA")`. **Troque por uma senha sua antes de gravar**, senão qualquer pessoa que conheça o código poderá enviar firmware para o ESP pela rede. A IDE pede essa senha a cada envio por rede.
 - **`/config` não tem autenticação.** Use o ESP em rede confiável e **não exponha a porta 80 à internet**.
 - **Chaves ficam gravadas em texto na flash** (chave do OpenWeatherMap, `DEVICE_KEY`, WiFi). Apagar a flash por completo as remove.
 - **HTTPS sem validação de certificado** (`setInsecure()`): protege contra espionagem simples, mas não contra um servidor falso.
@@ -518,6 +556,7 @@ O `WeatherStation.ino` é um arquivo único, dividido em seções numeradas. Tod
 | **"Memória insuficiente para HTTPS"** | Veja memória livre na aba Sistema; reduza uso ou aumente `API_TLS_RX_BUF` |
 | **Hora errada** | Fuso e horário de verão na aba Clima; aguarde a sincronização NTP |
 | **Porcentagem da bateria estranha** | Calibre `BAT_CALIB` com multímetro e confira o divisor |
+| **Ícone de energia sempre "bateria" (ou sempre "tomada")** | Confira se o divisor está ligado na **entrada** de 5 V da UPS (IN+), o GND comum, o resistor de 20 kΩ para o GND e se o sensor está ativado; se estiver invertido, use `ENERGIA_ATIVA_EM_ALTO false` |
 | **OTA não aparece** | PC e ESP na mesma rede; reinicie a IDE; confira o firewall |
 | **Tela preta depois de conectar ao WiFi** | Falta a chave do OpenWeatherMap (placa nova ou depois de um reset geral). No boot o OLED mostra "Sem chave da API" com o endereço da `/config`; informe a chave na aba Clima |
 | **A tela apaga sozinha** | É o **tempo de tela ligada** (`/config` → Tela). Aperte o botão das telas uma vez para acender; escolha "Sempre ligada" para desativar |
@@ -555,6 +594,8 @@ WeatherStation/
 | **2.5** | **Tempo de tela ligada** (apaga sozinha; o clique acende, 10 s no horário desligado) |
 | **2.6** | Código reorganizado em seções comentadas e **seleção de placa por uma linha** (ESP8266 comum ou NodeMCU com OLED integrado) |
 | **2.7** | Clique no botão de reset geral envia os dados ao painel e mostra o resultado no OLED; aviso no boot quando falta a chave da API (sem tela preta) |
+| **2.8** | Sensor de **energia externa** para placa UPS (nobreak): ícone de tomada no OLED e na página, ativável em `/config` |
+| **2.9** | API com **20 campos**: energia externa, estado do sensor, tempo ligado, motivo do reinício, memória livre, ID do chip, intervalo de envio, tela e qualidade do sinal; o envio não é mais bloqueado quando o sensor falha |
 
 ---
 
@@ -581,7 +622,7 @@ Este projeto é distribuído sob a **licença MIT**. Mantenha o aviso de copyrig
 MIT License
 
 Copyright (c) 2018 Daniel Eichhorn - ThingPulse (código original)
-Copyright (c) 2026 SEU NOME (modificações)
+Copyright (c) 2026 Luismar Pavani (modificações)
 
 É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia deste
 software e dos arquivos de documentação associados, para lidar com o Software sem
