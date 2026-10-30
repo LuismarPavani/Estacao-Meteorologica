@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-2.9-success)
+![Versão](https://img.shields.io/badge/firmware-3.0-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -308,7 +308,7 @@ A página é dividida em **abas**; cada ação salva volta para a aba certa com 
 | Aba | O que tem |
 |---|---|
 | **Clima** | Chave da API, ID da cidade, idioma (7 opções), fuso horário (34 opções) e horário de verão; seção **Painel web (API)** com ID do dispositivo, URL da API, `DEVICE_KEY`, botão **Enviar dados agora**, resultado do último envio e cidade enviada |
-| **Tela** | Ligar/apagar o display, **tempo de cada tela** (5 a 30 s, de 5 em 5), **tempo de tela ligada** (sempre ligada ou 1, 5, 10, 15, 30, 60 min) e **horário automático** (ligar às / apagar às; aceita janela que passa da meia-noite) |
+| **Tela** | Ligar/apagar o display, **tempo de cada tela** (5 a 30 s, de 5 em 5), **tempo de tela ligada** (sempre ligada ou 1, 5, 10, 15, 30, 60 min) **horário automático** (ligar às / apagar às; aceita janela que passa da meia-noite) e o **LED azul de status** (ligar/desligar e seguir o horário da tela) |
 | **Bateria** | Ativar/desativar a leitura da bateria e o sensor de energia da UPS (por dispositivo); estado: alimentação (energia externa ou bateria), carga, tensão e situação |
 | **WiFi** | Dados da conexão com ícone de sinal, abrir o portal de configuração e apagar a rede salva |
 | **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), chip, CPU, flash, programa, memória, firmware, versão do core, sensor e o botão **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
@@ -358,7 +358,14 @@ O LED azul (GPIO2 e, se o D0 não for o sensor de energia, também o GPIO16) ind
 | Botão segurado por mais de 3 s (aviso de reset) | pisca rápido |
 | Normal | apagado |
 
-Para desligar tudo: `#define LED_STATUS_ATIVO false`.
+**Configuração pela página** (`/config` → **Tela** → "LED azul de status"):
+
+| Opção | O que faz |
+|---|---|
+| **Piscar o LED azul para indicar o estado** | Liga ou desliga todos os padrões acima. Desmarcado, o LED fica sempre apagado |
+| **Seguir o horário automático da tela** | O LED só pisca durante o dia, no horário em que a tela fica ligada, e fica **apagado no horário de tela desligada** (à noite). Precisa do horário automático ativado; sem agenda ou antes de a hora sincronizar, o LED funciona normalmente |
+
+A escolha fica salva na flash. `LED_STATUS_ATIVO` no código é só o padrão de fábrica.
 
 > O display **não pode** usar o D4 (GPIO2), senão o LED pisca junto com o barramento I2C.
 
@@ -415,7 +422,7 @@ O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe
 curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   -H "Content-Type: application/json" \
   -H "x-device-key: SUA_DEVICE_KEY" \
-  -d '{"device_id":"esp8266-sala","temperature":24.5,"humidity":61.3,"city_id":3448439,"city_name":"São Paulo","ip":"192.168.0.50","rssi":-62,"firmware":"2.9","battery_active":true,"battery":83,"battery_voltage":4.02,"external_power":false,"sensor_ok":true,"uptime_s":86400,"reset_reason":"Power on","free_heap":24120,"chip_id":"A1B2C3","send_interval_s":900,"display_on":true,"rssi_pct":76}'
+  -d '{"device_id":"esp8266-sala","temperature":24.5,"humidity":61.3,"city_id":3448439,"city_name":"São Paulo","ip":"192.168.0.50","rssi":-62,"firmware":"3.0","battery_active":true,"battery":83,"battery_voltage":4.02,"external_power":false,"sensor_ok":true,"uptime_s":86400,"reset_reason":"Power on","free_heap":24120,"chip_id":"A1B2C3","send_interval_s":900,"display_on":true,"rssi_pct":76}'
 ```
 
 > O ESP usa **HTTPS sem validar o certificado** (`setInsecure()`), com buffer de 1024 bytes (`API_TLS_RX_BUF`). Se a conexão falhar por falta de memória, aumente esse valor ou veja a aba **Sistema**.
@@ -435,6 +442,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | POST | `/agenda` | Salva o horário automático da tela |
 | POST | `/tempotela` | Salva o tempo de cada tela do OLED (5 a 30 s) |
 | POST | `/tempoligada` | Salva o tempo de tela ligada (0 = sempre ligada; 1, 5, 10, 15, 30 ou 60 min) |
+| POST | `/led` | Liga/desliga o LED de status e define se ele segue o horário automático da tela |
 | POST | `/bateria` | Ativa/desativa a bateria |
 | POST | `/api` | Salva ID, URL e `DEVICE_KEY` do painel |
 | POST | `/enviar` | Envia uma leitura agora |
@@ -482,7 +490,7 @@ As principais constantes ficam no topo do `WeatherStation.ino`:
 | `DHTPIN`, `DHTTYPE` | Pino e modelo do sensor (`DHT22` ou `DHT11`), no bloco da placa |
 | `DISPLAY_SDA`, `DISPLAY_SCL` | Pinos I2C do display, no bloco da placa |
 | `I2C_DISPLAY_ADDRESS` | Endereço do OLED (`0x3c`) |
-| `LED_STATUS_ATIVO` | Liga/desliga o LED de status |
+| `LED_STATUS_ATIVO` | Padrão de fábrica do LED de status (muda em `/config` → Tela) |
 | `PIN_BOTAO_TELA` | Pino do botão das telas (padrão `D7`), no bloco da placa |
 | `PIN_BOTAO_RESET` | Pino do botão de reset geral (`D6` na placa comum, `D1` na com OLED integrado; `-1` desativa), no bloco da placa |
 | `PIN_ENERGIA` | Pino do sensor de energia da UPS (`D0`; `-1` desativa), no bloco da placa |
@@ -596,6 +604,7 @@ WeatherStation/
 | **2.7** | Clique no botão de reset geral envia os dados ao painel e mostra o resultado no OLED; aviso no boot quando falta a chave da API (sem tela preta) |
 | **2.8** | Sensor de **energia externa** para placa UPS (nobreak): ícone de tomada no OLED e na página, ativável em `/config` |
 | **2.9** | API com **20 campos**: energia externa, estado do sensor, tempo ligado, motivo do reinício, memória livre, ID do chip, intervalo de envio, tela e qualidade do sinal; o envio não é mais bloqueado quando o sensor falha |
+| **3.0** | LED azul configurável em `/config` → Tela: ligar/desligar e seguir o horário automático da tela (apagado à noite) |
 
 ---
 
@@ -622,7 +631,7 @@ Este projeto é distribuído sob a **licença MIT**. Mantenha o aviso de copyrig
 MIT License
 
 Copyright (c) 2018 Daniel Eichhorn - ThingPulse (código original)
-Copyright (c) 2026 Luismar Pavani (modificações)
+Copyright (c) 2026 SEU NOME (modificações)
 
 É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia deste
 software e dos arquivos de documentação associados, para lidar com o Software sem

@@ -143,7 +143,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "2.9"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.0"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "ESP8266-OTA-"
 
 // ---- Display OLED e sensor ----------------------------------------------------------------
@@ -159,7 +159,7 @@ const unsigned long BOTAO_RESET_GERAL_MS = 10000; // botão de reset geral: temp
 const unsigned long TELA_ACORDAR_NOITE_MS = 10000; // no horário agendado como desligado, o clique liga a tela só por este tempo
 const unsigned long TELA_MENSAGEM_MS = 3500;     // quanto tempo uma mensagem (ex.: resultado do envio ao painel) fica no OLED
 // LED azul (GPIO2 e GPIO16): pisca rápido = conectando ao WiFi, enviando ou aviso de reset; uma piscada longa a cada 2 s = sem WiFi;
-// 1 acendida = sucesso; 3 piscadas curtas = falha. false = LED sempre apagado.
+// 1 acendida = sucesso; 3 piscadas curtas = falha. false = LED apagado. Este é só o padrão de fábrica: liga/desliga em /config → Tela.
 #define LED_STATUS_ATIVO true
 
 // ---- Clima (OpenWeatherMap): padrões; a chave, a cidade e o idioma são configurados em /config (nunca publique a chave) 
@@ -238,6 +238,8 @@ struct Config {
   uint8_t telaTimeout;                  // tempo de tela ligada em minutos (0 = sempre ligada)
   uint8_t energiaOk;                    // 0xA5 = escolha do sensor de energia salva
   uint8_t energia;                      // 1 = este ESP tem o sensor de energia (placa UPS)
+  uint8_t ledOk;                        // 0xA5 = escolhas do LED salvas
+  uint8_t led;                          // bit 0 = LED de status ligado; bit 1 = seguir o horário automático da tela
 };
 
 // Opção da lista de fusos horários (minutos em relação ao UTC e nome)
@@ -336,6 +338,9 @@ unsigned long nextApi = 20000UL;        // 1º envio 20 s depois de ligar
 volatile uint8_t ledRede = LED_NORMAL;  // estado contínuo da rede
 volatile bool ledEnviando = false;      // true durante o envio ao painel
 volatile bool ledAviso = false;         // true enquanto o botão é segurado para apagar o WiFi
+volatile bool ledStatusAtivo = LED_STATUS_ATIVO;   // LED de status ligado? (escolhido em /config → Tela)
+bool ledSegueAgenda = false;            // true = LED apagado no horário agendado como tela desligada (escolhido em /config)
+volatile bool ledSilencio = false;      // true = LED silenciado agora pela agenda (atualizado a cada 1 s no loop)
 volatile uint8_t ledPulso = 0;          // 0 = nenhum, 1 = ok, 2 = falha
 volatile uint8_t ledPulsoPos = 0;
 volatile uint8_t ledPos = 0;
@@ -460,6 +465,7 @@ void handleEnviar();
 void handleTempoLigada();
 void handleTempoTela();
 void handleBateria();
+void handleLed();
 void handleAgenda();
 void handleDisplay();
 void handleResetWiFi();
@@ -854,6 +860,7 @@ void setup() {
   server.on("/tempotela", HTTP_POST, handleTempoTela);
   server.on("/tempoligada", HTTP_POST, handleTempoLigada);
   server.on("/bateria", HTTP_POST, handleBateria);
+  server.on("/led", HTTP_POST, handleLed);
   server.on("/api", HTTP_POST, handleApi);
   server.on("/enviar", HTTP_POST, handleEnviar);
   server.on("/reset-wifi", HTTP_POST, handleResetWiFi);
@@ -881,6 +888,7 @@ void loop() {
   // Estado da rede: pisca devagar se o WiFi cair (como em interruptores inteligentes)
   if ((long)(ms - nextRede) >= 0) {
     nextRede = ms + 1000UL;
+    ledSilencio = ledSegueAgenda && agendaEstadoAtual() == 0;   // à noite (tela desligada pela agenda) o LED fica apagado
     bool conectado = (WiFi.status() == WL_CONNECTED);
     if (!conectado && ledRede != LED_SEM_REDE) {
       ledRede = LED_SEM_REDE;
@@ -965,6 +973,10 @@ void carregaConfig() {
   }
   if (c.bateriaOk == 0xA5) bateriaAtiva = (c.bateria == 1);
   if (c.energiaOk == 0xA5) energiaAtiva = (c.energia == 1);
+  if (c.ledOk == 0xA5) {
+    ledStatusAtivo = (c.led & 1) != 0;
+    ledSegueAgenda = (c.led & 2) != 0;
+  }
   if (c.apiOk == 0xA5) {
     c.apiUrl[sizeof(c.apiUrl) - 1] = 0;
     c.deviceKey[sizeof(c.deviceKey) - 1] = 0;
@@ -1001,6 +1013,8 @@ void salvaConfig() {
   c.bateria = bateriaAtiva ? 1 : 0;
   c.energiaOk = 0xA5;
   c.energia = energiaAtiva ? 1 : 0;
+  c.ledOk = 0xA5;
+  c.led = (ledStatusAtivo ? 1 : 0) | (ledSegueAgenda ? 2 : 0);
   c.apiOk = 0xA5;
   snprintf(c.apiUrl, sizeof(c.apiUrl), "%s", apiUrl.c_str());
   snprintf(c.deviceKey, sizeof(c.deviceKey), "%s", deviceKey.c_str());
@@ -1041,11 +1055,12 @@ void ledEscreve(bool aceso) {
 
 /**
  * Executada a cada 100 ms pelo Ticker: decide se o LED fica aceso conforme o padrão atual
- * (conectando, sem WiFi, enviando, aviso de reset ou pulso de sucesso/falha).
+ * (conectando, sem WiFi, enviando, aviso de reset ou pulso de sucesso/falha). Fica sempre apagado
+ * se o LED de status estiver desligado em /config ou silenciado pela agenda.
  */
 void ledTick() {
   bool aceso = false;
-  if (LED_STATUS_ATIVO) {
+  if (ledStatusAtivo && !ledSilencio) {
     if (ledPulso) {
       // cada posição = 100 ms: ok = 300 ms aceso; falha = 3 piscadas curtas
       uint16_t bits = (ledPulso == 1) ? 0b0000000111 : 0b0000010101;
@@ -1962,7 +1977,7 @@ int parseHora(const String& t) {
 /** Redireciona (303) para a aba certa da /config, com o código da mensagem de resultado. */
 void redirecionaConfig(const char* r) {
   const char* aba = "clima";
-  if (!strcmp(r, "disp") || !strcmp(r, "agenda") || !strcmp(r, "hora") || !strcmp(r, "horaigual") || !strcmp(r, "tempo") || !strcmp(r, "tempo_erro") || !strcmp(r, "tempoligada") || !strcmp(r, "tempoligada_erro")) aba = "tela";
+  if (!strcmp(r, "disp") || !strcmp(r, "agenda") || !strcmp(r, "hora") || !strcmp(r, "horaigual") || !strcmp(r, "tempo") || !strcmp(r, "tempo_erro") || !strcmp(r, "tempoligada") || !strcmp(r, "tempoligada_erro") || !strcmp(r, "led")) aba = "tela";
   else if (!strcmp(r, "bat")) aba = "bateria";
   server.sendHeader("Location", String("/config?aba=") + aba + "&r=" + r);
   server.send(303, "text/plain", "");
@@ -2240,6 +2255,7 @@ void paginaConfig() {
   else if (r == "tempo_erro") msg = "⚠️ Tempo inválido: escolha de 5 a 30 segundos.";
   else if (r == "tempoligada") msg = "✅ Tempo de tela ligada salvo.";
   else if (r == "tempoligada_erro") msg = "⚠️ Tempo de tela ligada inválido.";
+  else if (r == "led") msg = "✅ Configuração do LED salva.";
   else if (r == "agenda") msg = "✅ Horário salvo.";
   else if (r == "hora") msg = "⚠️ Horário inválido.";
   else if (r == "horaigual") msg = "⚠️ Os horários de ligar e de apagar não podem ser iguais.";
@@ -2401,6 +2417,19 @@ void paginaConfig() {
          "<div class=\"mut\">O botão manual vale até o próximo horário programado. "
          "Depende da hora da internet (NTP), então só funciona depois de sincronizar.</div>"
          "<button type=\"submit\">Salvar horário</button></form>";
+    h += "<h4>LED azul de status</h4>"
+         "<form method=\"POST\" action=\"/led\">"
+         "<label><input type=\"checkbox\" name=\"ativo\" value=\"1\"";
+    if (ledStatusAtivo) h += " checked";
+    h += "> Piscar o LED azul para indicar o estado</label>"
+         "<div class=\"mut\">Pisca rápido ao conectar no WiFi e ao enviar dados, devagar quando o WiFi cai, "
+         "e dá 1 acendida (sucesso) ou 3 piscadas (falha) no fim de um envio.</div>"
+         "<label><input type=\"checkbox\" name=\"agenda\" value=\"1\"";
+    if (ledSegueAgenda) h += " checked";
+    h += "> Seguir o horário automático da tela</label>"
+         "<div class=\"mut\">O LED só pisca durante o dia, no horário em que a tela fica ligada, e fica apagado no horário de tela desligada (à noite). "
+         "Precisa do horário automático ativado acima.</div>"
+         "<button type=\"submit\">Salvar LED</button></form>";
 
   } else if (aba == "bateria") {
     // ---------- Aba Bateria: ativar/desativar e estado ----------
@@ -2579,6 +2608,18 @@ void handleTempoTela() {
   ui.setTimePerFrame((uint16_t)(telaSeg * 1000));
   salvaConfig();
   redirecionaConfig("tempo");
+}
+
+/**
+ * POST /led: liga ou desliga o LED azul de status e define se ele segue o horário automático da
+ * tela (apagado no horário de tela desligada).
+ */
+void handleLed() {
+  ledStatusAtivo = server.hasArg("ativo");
+  ledSegueAgenda = server.hasArg("agenda");
+  ledSilencio = ledSegueAgenda && agendaEstadoAtual() == 0;     // vale já, sem esperar o próximo ciclo do loop
+  salvaConfig();
+  redirecionaConfig("led");
 }
 
 /**
