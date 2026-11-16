@@ -234,7 +234,7 @@ Evite D0, D3, D4 e D8 (pinos de boot e LED) e os pinos do display e do sensor.
 Com uma placa UPS (carregador + elevador 5 V para Li-ion) o ESP funciona como um nobreak. Para saber se há energia externa, o **D0 (GPIO16)** lê se existe 5 V na **entrada** da UPS, por um divisor de tensão:
 
 ```
-Entrada 5 V da UPS (IN+, do carregador/USB) ──[ 10 kΩ ]──┬── D0 (GPIO16)
+Entrada 5 V da UPS (IN+, do carregador/USB) ──[ 10 kΩ ]───┬── D0 (GPIO16)
                                                           │
                                                        [ 20 kΩ ]
                                                           │
