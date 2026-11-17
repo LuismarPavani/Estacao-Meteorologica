@@ -113,8 +113,13 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "3.1"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.3"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "WeatherStationESP8266-"   // nome na rede e na porta OTA: este prefixo + ID do chip (ex.: WeatherStationESP8266-a1b2c3). Só letras, números e hífen; até 26 caracteres
+
+// ---- Hora da internet (NTP): até 3 servidores, usados na ordem se um não responder --------
+#define NTP_SERVIDOR_1  "a.st1.ntp.br"      // NTP.br (servidor oficial brasileiro)
+#define NTP_SERVIDOR_2  "pool.ntp.org"
+#define NTP_SERVIDOR_3  "time.google.com"
 
 // ---- WiFi no boot -------------------------------------------------------------------------
 // Com rede salva, espera a conexão por até este tempo; depois segue sem WiFi e reconecta sozinho.
@@ -139,6 +144,14 @@ const unsigned long TELA_MENSAGEM_MS = 3500;     // quanto tempo uma mensagem (e
 #define BRILHO_PADRAO          100
 #define BRILHO_NOITE_PADRAO    20
 #define NOITE_DIMINUI_PADRAO   false
+// NOITE_PELO_SOL_PADRAO: true = o brilho noturno vale do pôr ao nascer do sol (calculado com as coordenadas da
+// cidade); false = vale no horário de tela desligada do horário automático (agenda).
+#define NOITE_PELO_SOL_PADRAO  false
+// Telas do OLED que aparecem (padrão de fábrica; muda em /config → Tela). Some os números das telas:
+//   1 = Data e hora, 2 = Clima interno, 4 = Clima atual, 8 = Próximas 24 h, 16 = Próximos dias,
+//   32 = Sol e Lua, 64 = WiFi e bateria.   127 = todas.
+#define TELAS_PADRAO           127
+const unsigned long IP_TELA_MS = 4000;           // tela "WiFi conectado" (rede, sinal e IP) logo depois de conectar
 // LED azul (GPIO2 e GPIO16): pisca rápido = conectando ao WiFi, enviando ou aviso de reset; uma piscada longa a cada 2 s = sem WiFi;
 // 1 acendida = sucesso; 3 piscadas curtas = falha. false = LED apagado. Este é só o padrão de fábrica: liga/desliga em /config → Tela.
 #define LED_STATUS_ATIVO true
@@ -182,6 +195,9 @@ const unsigned long ENERGIA_INTERVAL_MS = 200;   // leitura do pino (muda de est
 #define API_URL_PADRAO ""               // sem URL o envio ao painel fica desligado; informe em /config → Clima → Painel web
 const unsigned long PAINEL_INTERVAL_MS = 15UL * 60UL * 1000UL;   // envio automático ao painel a cada 15 min
 const unsigned long PAINEL_RETRY_MS    = 2UL * 60UL * 1000UL;    // se o envio falhar, tenta de novo em 2 min
+// Memória mínima para tentar o envio por HTTPS (abaixo disso o envio é adiado, sem travar o ESP)
+#define HTTPS_MIN_LIVRE 12500           // bytes livres no total
+#define HTTPS_MIN_BLOCO 7000            // maior bloco contínuo livre
 #define API_TLS_RX_BUF 1024             // buffer de recepção do HTTPS (mesmo valor do WeatherApi.h; aumente se a conexão falhar)
 
 // ---- Histórico interno (144 pontos x 5 min = 12 h, guardado em anel na RAM) ---------------
