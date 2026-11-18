@@ -1,4 +1,4 @@
-# 🌦️ WeatherStation ESP8266
+# 🌦️ Estação Meteorológica ESP8266
 
 Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de **temperatura e umidade interna**, clima e previsão do **OpenWeatherMap**, **página web** responsiva servida pelo próprio ESP, **configuração 100% pelo navegador**, leitura de **bateria**, **LED de status**, **OTA** e envio das leituras para uma **API/painel web** (Next.js + Vercel + Supabase).
 
@@ -67,7 +67,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 - **Bateria** ativável por dispositivo (cada ESP pode ou não ter bateria).
 - Dados do painel web: ID do dispositivo, URL da API e `DEVICE_KEY`.
 - Portal de configuração de WiFi (WiFiManager), protegido por senha.
-- Senhas, placa e padrões de fábrica num só arquivo, o `WeatherStationConfig.h`.
+- Senhas, placa e padrões de fábrica num só arquivo, o `EstacaoConfig.h`.
 
 **Conectividade e manutenção**
 - Atualização **OTA** protegida por senha.
@@ -84,7 +84,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ```mermaid
 flowchart LR
-  ESP["ESP8266<br/>WeatherStation"] -->|HTTP| OWM["OpenWeatherMap"]
+  ESP["ESP8266<br/>Estação Meteorológica"] -->|HTTP| OWM["OpenWeatherMap"]
   ESP -->|NTP| NTP["pool.ntp.org"]
   ESP -->|"POST /api/readings<br/>x-device-key"| API["API Next.js<br/>(Vercel)"]
   API --> DB[("Supabase")]
@@ -104,7 +104,7 @@ flowchart LR
 
 ## 📟 Telas do display OLED
 
-Ao ligar, o OLED mostra por 2,5 s (`ABERTURA_MS`) uma **tela de abertura** com o logo (sol atrás de uma nuvem), o nome "Weather Station" e a versão do firmware. O logo fica em `Logo_bits`, no `WeatherStationImages.h`.
+Ao ligar, o OLED mostra por 2,5 s (`ABERTURA_MS`) uma **tela de abertura** com o logo (sol atrás de uma nuvem), o nome "Estação Meteorológica" e a versão do firmware. O logo fica em `Logo_bits`, no `EstacaoImagens.h`.
 
 Enquanto conecta ao WiFi, aparece "Conectando ao WiFi" com o ícone e **3 pontos animados**. Ao conectar, o OLED mostra por 4 s (`IP_TELA_MS`) a tela **WIFI CONECTADO**: faixa de título, ícone de sinal, nome da rede, sinal (dBm e %) e o **IP em destaque**. Se o ESP ligou sem rede, essa tela aparece na primeira vez que o WiFi conectar.
 
@@ -209,7 +209,7 @@ O OLED já vem soldado em **D5 (SDA)** e **D6 (SCL)** neste modelo (confirmado n
 | Botão das telas | **D7** → GND |
 | Botão de reset geral | **D1** → GND (o D6 é o SCL do display) |
 
-Para usar essa placa, **troque uma única linha** no `WeatherStationConfig.h` (seção 2, "Seleção da placa e pinagem"):
+Para usar essa placa, **troque uma única linha** no `EstacaoConfig.h` (seção 2, "Seleção da placa e pinagem"):
 
 ```cpp
 //#define PLACA_ESP8266_COMUM          // comente esta
@@ -220,7 +220,7 @@ Os pinos do display, do sensor e dos botões mudam sozinhos. Se a tela ficar em 
 
 ### Sensor DHT11 em vez de DHT22
 
-No bloco da sua placa (seção 2 do `WeatherStationConfig.h`), troque apenas o tipo (a biblioteca é a mesma):
+No bloco da sua placa (seção 2 do `EstacaoConfig.h`), troque apenas o tipo (a biblioteca é a mesma):
 
 ```cpp
 #define DHTTYPE DHT11
@@ -236,7 +236,7 @@ Ligue cada botão de pressão **entre o pino e o GND**. Não precisa de resistor
 |---|---|---|---|
 | **Das telas** | **D7** (GPIO13) | Clique | Próxima tela do OLED. Com a tela apagada, o clique só liga a tela |
 | | | Segurar 3 s | Aparece "Apagando o WiFi..." com barra de progresso e o LED pisca rápido. Soltar cancela |
-| | | Segurar 8 s | Apaga **só a rede WiFi salva** e reinicia. Na volta, abre o portal `ESP_WeatherStation` |
+| | | Segurar 8 s | Apaga **só a rede WiFi salva** e reinicia. Na volta, abre o portal `EstacaoMeteorologica` |
 | **Reset geral / envio** | **D6** (GPIO12); na variante B, **D1** | Clique | **Envia uma leitura ao painel agora** (igual ao botão "Enviar dados agora" da `/config`). Durante o envio, o OLED mostra uma tela "PAINEL WEB" com uma nuvem com seta, a etapa atual ("Preparando dados", "Conectando (HTTPS)") e uma barra de progresso. No fim, por 3,5 s: **sucesso** = círculo com visto, "Enviado!", o **código HTTP**, o tempo do envio e a leitura enviada (ex.: `HTTP 200  1,2 s` / `24.5°C  61%`); **falha** = círculo com X, "Falhou", o erro e quando será a nova tentativa. Se a tela estiver apagada, ela acende só para mostrar o resultado |
 | | | Segurar 3 s | Aparece "RESET GERAL - Apaga WiFi e ajustes" com barra de progresso e o LED pisca rápido. Soltar cancela |
 | | | Segurar 10 s | Apaga o **WiFi e todos os ajustes salvos** (chave do OpenWeatherMap, cidade, idioma, fuso, agenda, bateria, ID/URL/`DEVICE_KEY` do painel e tempo das telas) e reinicia no padrão do código |
@@ -303,8 +303,8 @@ Fator total do divisor = (100k + 220k + 100k) / 100k = **4,2** (`BAT_FATOR`). Se
 Já fazem parte do pacote ESP8266: `ESP8266WiFi`, `ESP8266WebServer`, `ArduinoOTA`, `EEPROM`, `Ticker`, `ESP8266HTTPClient` e `WiFiClientSecure`.
 
 ### 3. Gravar
-1. Coloque `WeatherStation.ino`, `WeatherStationConfig.h`, `WeatherStationFonts.h` e `WeatherStationImages.h` **na mesma pasta chamada `WeatherStation`**. Se você baixou o projeto e não tem o `WeatherStationConfig.h`, copie o `WeatherStationConfig.example.h` com esse nome.
-2. Abra o `WeatherStationConfig.h` e troque as senhas (`OTA_SENHA`, `PORTAL_SENHA` e `CONFIG_SENHA`). Se precisar, escolha a placa na seção 2.
+1. Coloque `EstacaoMeteorologica.ino`, `EstacaoConfig.h`, `EstacaoFontes.h` e `EstacaoImagens.h` **na mesma pasta chamada `EstacaoMeteorologica`**. Se você baixou o projeto e não tem o `EstacaoConfig.h`, copie o `EstacaoConfig.example.h` com esse nome.
+2. Abra o `EstacaoConfig.h` e troque as senhas (`OTA_SENHA`, `PORTAL_SENHA` e `CONFIG_SENHA`). Se precisar, escolha a placa na seção 2.
 3. Conecte o ESP por USB, escolha a porta e clique em **Carregar**.
 4. Nos envios seguintes, a placa também aparece como **porta de rede** (OTA). A IDE pede a senha `OTA_SENHA`.
 
@@ -312,7 +312,7 @@ Já fazem parte do pacote ESP8266: `ESP8266WiFi`, `ESP8266WebServer`, `ArduinoOT
 
 ## 🚀 Primeira configuração
 
-1. **Ligue o ESP.** Sem WiFi salvo, ele cria a rede **`ESP_WeatherStation`** (`PORTAL_SSID`), protegida pela senha `PORTAL_SENHA` do `WeatherStationConfig.h`, e o LED pisca rápido.
+1. **Ligue o ESP.** Sem WiFi salvo, ele cria a rede **`EstacaoMeteorologica`** (`PORTAL_SSID`), protegida pela senha `PORTAL_SENHA` do `EstacaoConfig.h`, e o LED pisca rápido.
 2. Conecte-se a ela pelo celular, usando essa senha. O portal abre sozinho (ou acesse `192.168.4.1`). Escolha a sua rede e informe a senha.
 3. O ESP reinicia e conecta. O **IP** aparece na tela "WIFI CONECTADO" logo depois de conectar e na tela "WiFi e bateria" do OLED (ou na lista de clientes do roteador).
 4. Abra `http://IP-DO-ESP/` no navegador e toque na **engrenagem** para abrir a `/config`.
@@ -406,7 +406,7 @@ Em **`/config` → Bateria e energia → Economia na bateria** (precisa da **pla
 - **Abrir a página ou apertar um botão** deixa o ESP acordado por `ECO_ACORDADO_MS` (2 min): só o primeiro acesso demora até ~0,3 s a mais. O envio ao painel, a consulta do clima e o **OTA** também rodam sem o sono.
 - **Na tomada nada muda**: o WiFi volta na hora ao modo normal (*modem sleep*).
 
-Com a tela apagada e o ESP dormindo, o `loop()` faz pausas de `ECO_LOOP_MS` (100 ms); um toque muito rápido no botão pode precisar ser um pouco mais longo. Os padrões ficam no `WeatherStationConfig.h` (`ECO_BATERIA_PADRAO`, `ECO_INTERVALO_PADRAO`, `ECO_ACORDADO_MS`, `ECO_LOOP_MS`).
+Com a tela apagada e o ESP dormindo, o `loop()` faz pausas de `ECO_LOOP_MS` (100 ms); um toque muito rápido no botão pode precisar ser um pouco mais longo. Os padrões ficam no `EstacaoConfig.h` (`ECO_BATERIA_PADRAO`, `ECO_INTERVALO_PADRAO`, `ECO_ACORDADO_MS`, `ECO_LOOP_MS`).
 
 ---
 
@@ -527,6 +527,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | POST | `/enviar` | Envia uma leitura agora |
 | POST | `/portal` | Abre o portal de configuração de WiFi |
 | POST | `/reset-wifi` | Apaga a rede WiFi salva e reinicia |
+| POST | `/reiniciar` | Só reinicia o ESP (WiFi e ajustes continuam salvos); a página volta para Sistema em 15 s |
 | POST | `/reset-geral` | Apaga o WiFi e todos os ajustes salvos e reinicia |
 
 **Exemplo de `/json`**
@@ -565,7 +566,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 
 ## 🧩 Personalização no código
 
-Todas as senhas e constantes ajustáveis ficam no `WeatherStationConfig.h`. O `WeatherStation.ino` não precisa ser editado.
+Todas as senhas e constantes ajustáveis ficam no `EstacaoConfig.h`. O `EstacaoMeteorologica.ino` não precisa ser editado.
 
 | Constante | O que faz |
 |---|---|
@@ -605,7 +606,7 @@ Todas as senhas e constantes ajustáveis ficam no `WeatherStationConfig.h`. O `W
 | `API_TLS_RX_BUF` | Buffer de recepção do HTTPS |
 | `HTTPS_MIN_LIVRE`, `HTTPS_MIN_BLOCO` | Memória mínima para tentar o envio por HTTPS: total livre (12.500 bytes) e maior bloco contínuo (7.000 bytes). Abaixo disso o envio é adiado e a `/config` mostra os dois valores |
 | `FIRMWARE_VERSAO` | Versão enviada ao painel e mostrada na seção Sistema |
-| `HOSTNAME` | Prefixo do nome do dispositivo na rede e na porta OTA (padrão `WeatherStationESP8266-`). O ID do chip é acrescentado, por exemplo `WeatherStationESP8266-a1b2c3`, e a página também abre em `http://weatherstationesp8266-a1b2c3.local/` |
+| `HOSTNAME` | Prefixo do nome do dispositivo na rede e na porta OTA (padrão `EstacaoMeteorologica-`). O ID do chip é acrescentado, por exemplo `EstacaoMeteorologica-a1b2c3`, e a página também abre em `http://estacaometeorologica-a1b2c3.local/` |
 | `WIFI_BOOT_TIMEOUT_MS` | No boot, quanto tempo esperar a rede salva antes de seguir sem WiFi (30 s) |
 
 O corpo do envio à API está todo na função `montaPayloadApi()`.
@@ -614,21 +615,21 @@ O corpo do envio à API está todo na função `montaPayloadApi()`.
 
 ### Organização do arquivo e troca de placa
 
-O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as senhas e chaves, ficam no `WeatherStationConfig.h`; o resto fica no `WeatherStation.ino`. Todas as funções têm um comentário explicando o que fazem, e as variáveis são agrupadas por assunto.
+O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as senhas e chaves, ficam no `EstacaoConfig.h`; o resto fica no `EstacaoMeteorologica.ino`. Todas as funções têm um comentário explicando o que fazem, e as variáveis são agrupadas por assunto.
 
 | Seção | Conteúdo |
 |---|---|
-| Senhas e chaves (`WeatherStationConfig.h`) | Senha do OTA, rede e senha do portal de WiFi, chave padrão do OpenWeatherMap e `DEVICE_KEY` padrão |
+| Senhas e chaves (`EstacaoConfig.h`) | Senha do OTA, rede e senha do portal de WiFi, chave padrão do OpenWeatherMap e `DEVICE_KEY` padrão |
 | 1. Bibliotecas | `#include`, agrupados por finalidade |
-| 2. Seleção da placa e pinagem (`WeatherStationConfig.h`) | **O que muda ao trocar de ESP**: display, sensor e botões |
-| 3. Configurações do projeto (`WeatherStationConfig.h`) | Constantes ajustáveis (tempos, bateria, API, clima, fuso...) |
+| 2. Seleção da placa e pinagem (`EstacaoConfig.h`) | **O que muda ao trocar de ESP**: display, sensor e botões |
+| 3. Configurações do projeto (`EstacaoConfig.h`) | Constantes ajustáveis (tempos, bateria, API, clima, fuso...) |
 | 4. Tipos | Estrutura da EEPROM, lista de fusos, estados do LED |
 | 5. Objetos e variáveis de estado | Agrupados: clima, sensor, tela, agenda, bateria, API, LED, botões |
 | 6. Protótipos | Todas as funções declaradas, para a ordem não importar |
 | 7. Tabelas | Telas do OLED, idiomas, fusos, seções e estilo da `/config` e o HTML da página principal |
 | 8. Funções | Principal (`setup`/`loop`), configuração salva, LED, botões, sensores, bateria, clima, display, tela, WiFi, painel (API) e servidor web |
 
-**Trocar de placa** é só mudar uma linha na seção 2 do `WeatherStationConfig.h`:
+**Trocar de placa** é só mudar uma linha na seção 2 do `EstacaoConfig.h`:
 
 ```cpp
 #define PLACA_ESP8266_COMUM            // ESP8266 sem OLED integrado + OLED externo (modelo principal)
@@ -639,17 +640,17 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 
 ## 🔐 Segurança
 
-- **Senhas no `WeatherStationConfig.h`:** a senha do OTA (`OTA_SENHA`) e a do portal de WiFi (`PORTAL_SENHA`) ficam só nesse arquivo. **Troque as duas antes de gravar.** Sem uma senha forte no OTA, qualquer pessoa na rede pode tentar enviar firmware para o ESP. Sem senha no portal, quem estiver por perto poderia configurar o WiFi dele.
-- **Não publique o `WeatherStationConfig.h`.** Se usar Git, coloque-o no `.gitignore` e publique só o `WeatherStationConfig.example.h`, que não tem senhas reais.
+- **Senhas no `EstacaoConfig.h`:** a senha do OTA (`OTA_SENHA`) e a do portal de WiFi (`PORTAL_SENHA`) ficam só nesse arquivo. **Troque as duas antes de gravar.** Sem uma senha forte no OTA, qualquer pessoa na rede pode tentar enviar firmware para o ESP. Sem senha no portal, quem estiver por perto poderia configurar o WiFi dele.
+- **Não publique o `EstacaoConfig.h`.** Se usar Git, coloque-o no `.gitignore` e publique só o `EstacaoConfig.example.h`, que não tem senhas reais.
 - **Senha na `/config` (`CONFIG_SENHA`):** a configuração e todas as ações (salvar, enviar, resets, portal) pedem login. A senha é digitada uma vez em cada navegador, que fica conectado por `LOGIN_DIAS` dias (padrão 30), mesmo fechando o navegador ou reiniciando o ESP. Ficam sem senha só a página principal, `/json`, `/historico` e o botão de ligar/apagar a tela. Após 5 senhas erradas seguidas, o login fica bloqueado por 1 minuto.
   - **Sair:** o botão "Sair", no fim do menu da `/config`, desconecta só aquele navegador. "Desconectar todos os navegadores" (seção Sistema), trocar a `CONFIG_SENHA` ou o reset geral desconectam todos.
   - **Como funciona:** o cookie guarda um SHA-256 da senha com um sal aleatório gravado na EEPROM; a senha em si nunca vai no cookie. O cookie é `HttpOnly` e `SameSite=Lax`.
   - **Limite:** o ESP só fala HTTP, então a senha e o cookie trafegam sem criptografia na rede local. Use o ESP em rede confiável e **não exponha a porta 80 à internet**.
-  - **Esqueceu a senha?** Ela é a `CONFIG_SENHA` do `WeatherStationConfig.h`. O reset geral não muda a senha. Para trocá-la, edite o arquivo e grave o firmware de novo.
+  - **Esqueceu a senha?** Ela é a `CONFIG_SENHA` do `EstacaoConfig.h`. O reset geral não muda a senha. Para trocá-la, edite o arquivo e grave o firmware de novo.
 - **Proteção contra CSRF:** todos os `POST` conferem os cabeçalhos `Origin`/`Referer` e `Host`. Assim, um site aberto no navegador não consegue apagar ajustes nem trocar a URL do painel para capturar a `DEVICE_KEY`, nem por DNS rebinding. O pedido só é aceito quando vem da página do próprio ESP, aberta pelo IP ou pelo nome dele na rede. Pedidos sem esses cabeçalhos (`curl`, scripts) passam por essa verificação, porque não vêm de um navegador, mas as ações protegidas ainda exigem o cookie de login.
 - **Chaves ficam gravadas em texto na flash** (chave do OpenWeatherMap, `DEVICE_KEY`, WiFi). Apagar a flash por completo as remove.
 - **HTTPS sem validação de certificado** (`setInsecure()`): protege contra espionagem simples, mas não contra um servidor falso.
-- **Nunca publique chaves no repositório.** Antes de subir para o GitHub, confira se o `WeatherStationConfig.h` está fora do repositório.
+- **Nunca publique chaves no repositório.** Antes de subir para o GitHub, confira se o `EstacaoConfig.h` está fora do repositório.
 
 ---
 
@@ -675,12 +676,12 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 | **OTA não aparece** | PC e ESP na mesma rede; reinicie a IDE; confira o firewall |
 | **Tela preta depois de conectar ao WiFi** | Falta a chave do OpenWeatherMap (placa nova ou depois de um reset geral). No boot o OLED mostra "Sem chave da API" com o endereço da `/config`; informe a chave na seção Cidade e clima |
 | **A tela apaga sozinha** | É o **tempo de tela ligada** (`/config` → Display). Aperte o botão das telas uma vez para acender; em "Apagar sozinha após", escolha "Nunca" para desativar |
-| **Erro "Escolha apenas UMA placa" ou "Nenhuma placa selecionada"** | Deixe sem comentário só uma das linhas `PLACA_...` na seção 2 do `WeatherStationConfig.h` |
-| **Erro "WeatherStationConfig.h: No such file or directory"** | Copie o `WeatherStationConfig.example.h` para `WeatherStationConfig.h` na pasta do projeto e troque as senhas |
-| **Erro "PORTAL_SENHA precisa ter de 8 a 63 caracteres"** | A senha do portal no `WeatherStationConfig.h` é curta ou longa demais para o WPA2 |
+| **Erro "Escolha apenas UMA placa" ou "Nenhuma placa selecionada"** | Deixe sem comentário só uma das linhas `PLACA_...` na seção 2 do `EstacaoConfig.h` |
+| **Erro "EstacaoConfig.h: No such file or directory"** | Copie o `EstacaoConfig.example.h` para `EstacaoConfig.h` na pasta do projeto e troque as senhas. Vindo da 3.4 ou anterior, renomeie o seu `WeatherStationConfig.h` para `EstacaoConfig.h` e apague os `WeatherStation*.h` antigos da pasta |
+| **Erro "PORTAL_SENHA precisa ter de 8 a 63 caracteres"** | A senha do portal no `EstacaoConfig.h` é curta ou longa demais para o WPA2 |
 | **Botão não responde** | Ligue entre o pino e o GND (D7 para as telas, D6 para o reset geral); confira `PIN_BOTAO_TELA` e `PIN_BOTAO_RESET`; cliques durante o envio à API ou a atualização do clima podem ser perdidos |
 | **Quero trocar de rede WiFi** | Segure o botão das telas por 8 s, ou seção WiFi → "Apagar dados de WiFi" |
-| **Esqueci a senha da `/config`** | Ela é a `CONFIG_SENHA` do `WeatherStationConfig.h`. O reset geral não muda a senha. Sem o arquivo, defina uma senha nova nele e grave o firmware de novo (pela USB, ou por OTA se lembrar a `OTA_SENHA`) |
+| **Esqueci a senha da `/config`** | Ela é a `CONFIG_SENHA` do `EstacaoConfig.h`. O reset geral não muda a senha. Sem o arquivo, defina uma senha nova nele e grave o firmware de novo (pela USB, ou por OTA se lembrar a `OTA_SENHA`) |
 | **"Muitas tentativas erradas"** | Após 5 senhas erradas seguidas, o login fica bloqueado por 1 minuto |
 | **Pede a senha de novo antes dos 30 dias** | Alguém usou "Desconectar todos os navegadores", a `CONFIG_SENHA` mudou, foi feito um reset geral, ou o navegador apagou os cookies (modo anônimo, limpeza de dados) |
 | **Quero voltar ao padrão de fábrica** | Segure o botão de reset geral por 10 s, ou `/config` → Sistema → **Reset geral** (apaga o WiFi e todos os ajustes) |
@@ -690,12 +691,12 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 ## 📁 Estrutura do repositório
 
 ```
-WeatherStation/
-├── WeatherStation.ino          # firmware principal
-├── WeatherStationConfig.h      # senhas, chaves, placa/pinagem e configurações (não publicar)
-├── WeatherStationConfig.example.h  # modelo sem senhas: copie para WeatherStationConfig.h
-├── WeatherStationFonts.h       # fontes (ícones Meteocons)
-├── WeatherStationImages.h      # imagens do display (logo da abertura, ícone do WiFi e indicadores das telas)
+EstacaoMeteorologica/
+├── EstacaoMeteorologica.ino    # firmware principal
+├── EstacaoConfig.h      # senhas, chaves, placa/pinagem e configurações (não publicar)
+├── EstacaoConfig.example.h  # modelo sem senhas: copie para EstacaoConfig.h
+├── EstacaoFontes.h       # fontes (ícones Meteocons)
+├── EstacaoImagens.h      # imagens do display (logo da abertura, ícone do WiFi e indicadores das telas)
 └── README.md
 ```
 
@@ -722,7 +723,8 @@ WeatherStation/
 | **3.1** | **Brilho do OLED** em `/config` → Display (5% a 100%) com **brilho noturno** (apagar ou manter acesa à noite; acender à noite usa o brilho noturno) e ícone de brilho na página principal; senhas, placa e configurações movidas para o **`WeatherStationConfig.h`** (com modelo `.example.h`); **portal de WiFi com senha**; **proteção contra CSRF** nos `POST`; **boot sem roteador** sem reiniciar em loop (segue sem WiFi e reconecta sozinho); nome do sensor e do pino nas mensagens conforme `DHTTYPE`/`DHTPIN`; nome na rede passa a ser `WeatherStationESP8266-<chip>`; **tela de abertura** com logo, nome e versão; **tela do envio pelo botão** com ícones, etapas, barra de progresso, código HTTP e tempo; **senha na `/config`** com login lembrado por 30 dias (cookie), botões "Sair" e "Desconectar todos os navegadores"; o OLED mostra `--` (em vez de 0°C e 01/01/1970) até chegar o clima e a hora da internet, e mantém os últimos dados bons se uma consulta falhar |
 | **3.2** | **Escolha das telas** do OLED em `/config` → Display; **indicadores compactos** na barra inferior; nova tela **Sol e Lua** (nascer/pôr do sol e da Lua, fase e iluminação, calculados no ESP); tela 4 vira **Próximas 24 h** (mínima/máxima reais, chuva e sensação térmica, com cartões na página); clima consultado pelas **coordenadas da cidade**; **brilho noturno pelo pôr do sol** (opcional); tela **WIFI CONECTADO** com o IP e animação ao conectar; **3 servidores NTP**; cidade por **busca pelo nome** ou por **latitude/longitude**, com o ID opcional |
 | **3.3** | **Nova `/config` no estilo dos Ajustes do iPhone**: menu com ícones e resumo de cada seção, páginas separadas (Cidade e clima, Display, Data e hora, Bateria e energia, Painel web, WiFi, LED de status, Sistema), cartões, chaves liga/desliga, listas que salvam ao tocar e itens que abrem na própria página; fuso com rota própria (`/hora`); páginas menores e estilo na flash (menos RAM); fundo das páginas do ESP igual ao do painel web; envio ao painel com **`lat` e `lon`** (22 campos), para o painel funcionar com cidade sem ID (requer painel com `migration-v5.sql`); textos fixos movidos para a flash (~1,8 KB a mais de RAM livre) |
-| **3.4** | **Economia na bateria** em `/config` → Bateria e energia: sem energia externa (placa UPS), o WiFi entra em *light sleep* e fica acordado por 2 min após um acesso à página ou um clique; envio ao painel com intervalo próprio na bateria (15 a 60 min); envio, clima e OTA sem o sono; rota `/economia`; tela do envio pelo botão mostra "Conexão segura" (o texto antigo era cortado) |
+| **3.4** | **Economia na bateria** em `/config` → Bateria e energia: sem energia externa (placa UPS), o WiFi entra em *light sleep* e fica acordado por 2 min após um acesso à página ou um clique; envio ao painel com intervalo próprio na bateria (15 a 60 min); envio, clima e OTA sem o sono; rota `/economia`; tela do envio pelo botão mostra "Conexão segura" (o texto antigo era cortado); botão **Reiniciar o ESP** em Sistema (rota `/reiniciar`) e o "‹ voltar" das seções como botão; nome "Estação Meteorológica" na abertura do OLED, no título da página e no rodapé da `/config` |
+| **3.5** | Nomes em português: arquivos `EstacaoConfig.h` (e `.example.h`), `EstacaoFontes.h` e `EstacaoImagens.h` (antes `WeatherStation*.h`); rede do portal de WiFi `EstacaoMeteorologica` (antes `ESP_WeatherStation`); nome na rede e na porta OTA `EstacaoMeteorologica-<chip>` (antes `WeatherStationESP8266-<chip>`); comentários traduzidos. O `device_id` continua `esp8266-<chip>`, para o painel manter o histórico |
 
 ---
 
@@ -742,7 +744,7 @@ WeatherStation/
 - Bibliotecas: ThingPulse (OLED driver e Weather Station), JSON Streaming Parser, [WiFiManager](https://github.com/tzapu/WiFiManager) (tzapu), DHT sensor library (Adafruit).
 - Dados meteorológicos: [OpenWeatherMap](https://openweathermap.org/).
 
-Este projeto é distribuído sob a **licença MIT**. Mantenha o aviso de copyright original no cabeçalho do `WeatherStation.ino` e inclua um arquivo `LICENSE` na raiz do repositório.
+Este projeto é distribuído sob a **licença MIT**. Mantenha o aviso de copyright original no cabeçalho do `EstacaoMeteorologica.ino` e inclua um arquivo `LICENSE` na raiz do repositório.
 
 ```
 MIT License
