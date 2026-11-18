@@ -113,7 +113,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "3.3"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.4"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "WeatherStationESP8266-"   // nome na rede e na porta OTA: este prefixo + ID do chip (ex.: WeatherStationESP8266-a1b2c3). Só letras, números e hífen; até 26 caracteres
 
 // ---- Hora da internet (NTP): até 3 servidores, usados na ordem se um não responder --------
@@ -195,6 +195,13 @@ const unsigned long ENERGIA_INTERVAL_MS = 200;   // leitura do pino (muda de est
 #define API_URL_PADRAO ""               // sem URL o envio ao painel fica desligado; informe em /config → Clima → Painel web
 const unsigned long PAINEL_INTERVAL_MS = 15UL * 60UL * 1000UL;   // envio automático ao painel a cada 15 min
 const unsigned long PAINEL_RETRY_MS    = 2UL * 60UL * 1000UL;    // se o envio falhar, tenta de novo em 2 min
+// Economia na bateria (precisa da placa UPS ativa em /config → Bateria): sem energia externa o WiFi
+// entra em light sleep (~1-3 mA no lugar de ~15-20 mA) e o envio ao painel fica mais espaçado.
+// Qualquer acesso à página ou clique num botão mantém o ESP acordado por ECO_ACORDADO_MS.
+#define ECO_BATERIA_PADRAO      false   // padrão de fábrica (muda em /config → Bateria e energia)
+#define ECO_INTERVALO_PADRAO    30      // envio ao painel na bateria, em minutos (15, 20, 30, 45 ou 60)
+const unsigned long ECO_ACORDADO_MS = 2UL * 60UL * 1000UL;   // acordado depois de um acesso ou clique
+const unsigned long ECO_LOOP_MS     = 100;   // pausa do loop com a tela apagada e o ESP dormindo
 // Memória mínima para tentar o envio por HTTPS (abaixo disso o envio é adiado, sem travar o ESP)
 #define HTTPS_MIN_LIVRE 12500           // bytes livres no total
 #define HTTPS_MIN_BLOCO 7000            // maior bloco contínuo livre

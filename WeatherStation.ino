@@ -155,6 +155,9 @@ struct Config {
   uint8_t coordOk;                      // 0xA5 = coordenadas da cidade salvas (vêm do OpenWeatherMap)
   float lat;                            // latitude da cidade
   float lon;                            // longitude da cidade
+  uint8_t ecoOk;                        // 0xA5 = escolha da economia na bateria salva
+  uint8_t eco;                          // 1 = economia na bateria ligada
+  uint8_t ecoIntervalo;                 // envio ao painel na bateria, em minutos
 };
 
 // Leitor da resposta da busca de cidades (API de geocodificação do OpenWeatherMap), lida aos poucos
@@ -176,7 +179,7 @@ class BuscaCidade : public JsonListener {
     void key(String k) override { chave = k; }
     void startObject() override {
       nivel++;
-      if (nivel == 2) emNomesLocais = (chave == "local_names");
+      if (nivel == 2) emNomesLocais = (chave.equals(F("local_names")));
     }
     void endObject() override {
       if (nivel == 1 && n < MAX && r[n].nome.length()) n++;   // terminou uma cidade
@@ -186,13 +189,13 @@ class BuscaCidade : public JsonListener {
     void value(String v) override {
       if (n >= MAX) return;
       if (nivel == 1) {
-        if (chave == "name") r[n].nome = v;
-        else if (chave == "lat") r[n].lat = v.toFloat();
-        else if (chave == "lon") r[n].lon = v.toFloat();
-        else if (chave == "country") r[n].pais = v;
-        else if (chave == "state") r[n].estado = v;
-        else if (chave == "message") erro = v;
-      } else if (nivel == 2 && emNomesLocais && chave == "pt") {
+        if (chave.equals(F("name"))) r[n].nome = v;
+        else if (chave.equals(F("lat"))) r[n].lat = v.toFloat();
+        else if (chave.equals(F("lon"))) r[n].lon = v.toFloat();
+        else if (chave.equals(F("country"))) r[n].pais = v;
+        else if (chave.equals(F("state"))) r[n].estado = v;
+        else if (chave.equals(F("message"))) erro = v;
+      } else if (nivel == 2 && emNomesLocais && chave.equals(F("pt"))) {
         r[n].nomePt = v;                  // nome em português, quando a API tem
       }
     }
@@ -327,6 +330,10 @@ unsigned long nextBateria = 0;
 
 // ---- Energia externa (placa UPS) ----------------------------------------------------------
 bool energiaAtiva = ENERGIA_ATIVA_PADRAO;   // este ESP tem o sensor de energia? (escolhido em /config)
+bool ecoBateria = ECO_BATERIA_PADRAO;   // economia na bateria ligada? (escolhida em /config → Bateria e energia)
+uint8_t ecoIntervaloMin = ECO_INTERVALO_PADRAO;   // envio ao painel na bateria, em minutos
+bool ecoDormindo = false;               // true = WiFi em light sleep agora
+unsigned long ecoAcordadoAte = 0;       // millis() até quando fica acordado (acesso à página, clique, envio, OTA)
 bool energiaExterna = false;            // true = há 5 V na entrada (energia externa); false = rodando na bateria
 bool energiaUltima = false;             // última leitura bruta do pino (para o filtro)
 uint8_t energiaContagem = 0;            // quantas leituras iguais seguidas
@@ -399,7 +406,7 @@ void guardaHistorico();
 float lerTensaoBateria();
 int bateriaPercentual(float v);
 void atualizaBateria();
-const char* bateriaSituacao(float v);
+const __FlashStringHelper* bateriaSituacao(float v);
 
 // ---- ENERGIA EXTERNA (placa UPS) ----------------------------------------------------------
 void energiaLeAgora();
@@ -415,19 +422,24 @@ bool brilhoValido(int v);
 bool noiteAgora();
 uint8_t brilhoAgora();
 void ligaTela();
+bool naBateria();
+bool ecoIntervaloValido(int m);
+unsigned long intervaloEnvioMs();
+void ecoAcorda(unsigned long dur);
+void atualizaEco(unsigned long ms);
 void drawProgress(OLEDDisplay *display, int percentage, String label);
 void mostraMensagemTela(const String& titulo, const String& l1, const String& l2, unsigned long dur);
 void desenhaMensagemTela();
 bool trataMensagemTela(unsigned long ms);
-void desenhaCabecalho(const char* titulo);
+void desenhaCabecalho(const String& titulo);
 void desenhaIconeNuvemEnvio(int cx, int cy);
 void desenhaIconeOk(int cx, int cy);
 void desenhaIconeFalha(int cx, int cy);
 String cabeNaLargura(const String& s, int largura);
-void desenhaEnvioEtapa(int pct, const char* texto);
+void desenhaEnvioEtapa(int pct, const String& texto);
 void desenhaResultadoEnvio();
 bool horaOk();
-void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const char* titulo);
+void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const String& titulo);
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
@@ -443,7 +455,7 @@ void desenhaSeta(OLEDDisplay *display, int x, int y, bool cima);
 void desenhaSolPequeno(OLEDDisplay *display, int cx, int cy);
 void desenhaLuaPequena(OLEDDisplay *display, int cx, int cy);
 String horaCurta(time_t t);
-const char* nomeFaseLua(uint8_t fase);
+const __FlashStringHelper* nomeFaseLua(uint8_t fase);
 void atualizaAstro();
 uint8_t contaTelas(uint8_t mask);
 void aplicaTelas();
@@ -517,7 +529,7 @@ String tabelaSistema();
 String tempoCurto(unsigned long s);
 String msgConfig(const String& r, bool& erro);
 String secaoResumo(uint8_t k);
-void cfgCabecalho(const String& titulo, const char* voltaHref, const char* voltaTexto, const String& r);
+void cfgCabecalho(const String& titulo, const String& voltaHref, const String& voltaTexto, const String& r);
 void cfgRodape(String& h);
 String itemSwitch(const char* nome, const String& rotulo, bool ligado, bool autoEnvia, const String& sub = "");
 String itemSelect(const String& rotulo, const char* nome, bool autoEnvia);
@@ -541,6 +553,7 @@ void handleEnviar();
 void handleTempoLigada();
 void handleTempoTela();
 void handleBateria();
+void handleEconomia();
 void handleLed();
 void handleBrilho();
 void handleTelas();
@@ -560,7 +573,14 @@ void handlePortal();
 // ---- Telas do OLED (deslizam da direita para a esquerda) e barra inferior -----------------
 // Todas as telas, na ordem em que aparecem. Em /config → Tela escolhe-se quais entram (telasMask, bit k = TELAS[k]).
 FrameCallback TELAS[] = {drawDateTime, drawClimaInterno, drawCurrentWeather, drawCurrentWeatherDetails, drawForecast, drawSolLua, drawWiFi};
-static const char* const TELAS_NOME[] = {"Data e hora", "Clima interno", "Clima atual", "Próximas 24 h", "Próximos dias", "Sol e Lua", "WiFi e bateria"};
+static const char TELA_NOME_0[] PROGMEM = "Data e hora";
+static const char TELA_NOME_1[] PROGMEM = "Clima interno";
+static const char TELA_NOME_2[] PROGMEM = "Clima atual";
+static const char TELA_NOME_3[] PROGMEM = "Próximas 24 h";
+static const char TELA_NOME_4[] PROGMEM = "Próximos dias";
+static const char TELA_NOME_5[] PROGMEM = "Sol e Lua";
+static const char TELA_NOME_6[] PROGMEM = "WiFi e bateria";
+static const char* const TELAS_NOME[] = {TELA_NOME_0, TELA_NOME_1, TELA_NOME_2, TELA_NOME_3, TELA_NOME_4, TELA_NOME_5, TELA_NOME_6};   // textos na flash: use FPSTR(TELAS_NOME[k])
 const uint8_t TELAS_TOTAL = 7;
 const uint8_t TELA_WIFI = 6;            // índice da tela 'WiFi e bateria' (a que mostra o IP)
 FrameCallback framesAtivos[7];          // só as telas marcadas (montado por aplicaTelas())
@@ -570,45 +590,86 @@ int numberOfOverlays = 1;
 
 // ---- Idiomas do OpenWeatherMap (lista da página /config) ----------------------------------
 static const char* const LANG_CODES[] = {"pt_br", "pt", "en", "es", "fr", "de", "it"};
-static const char* const LANG_NAMES[] = {"Português (Brasil)", "Português (Portugal)", "English", "Español", "Français", "Deutsch", "Italiano"};
+static const char LANG_NOME_0[] PROGMEM = "Português (Brasil)";
+static const char LANG_NOME_1[] PROGMEM = "Português (Portugal)";
+static const char LANG_NOME_2[] PROGMEM = "English";
+static const char LANG_NOME_3[] PROGMEM = "Español";
+static const char LANG_NOME_4[] PROGMEM = "Français";
+static const char LANG_NOME_5[] PROGMEM = "Deutsch";
+static const char LANG_NOME_6[] PROGMEM = "Italiano";
+static const char* const LANG_NAMES[] = {LANG_NOME_0, LANG_NOME_1, LANG_NOME_2, LANG_NOME_3, LANG_NOME_4, LANG_NOME_5, LANG_NOME_6};   // textos na flash: use FPSTR(LANG_NAMES[k])
 static const uint8_t LANG_COUNT = 7;
 
 // ---- Fusos horários (minutos em relação ao UTC) da página /config -------------------------
-static const Fuso FUSOS[] = {
-  {-720, "UTC-12:00"},
-  {-660, "UTC-11:00"},
-  {-600, "UTC-10:00 (Havaí)"},
-  {-540, "UTC-09:00 (Alasca)"},
-  {-480, "UTC-08:00 (Califórnia)"},
-  {-420, "UTC-07:00 (Colorado)"},
-  {-360, "UTC-06:00 (México, Chicago)"},
-  {-300, "UTC-05:00 (Acre, Nova York, Colômbia)"},
-  {-240, "UTC-04:00 (Amazonas, Mato Grosso, Venezuela)"},
-  {-210, "UTC-03:30 (Terra Nova)"},
-  {-180, "UTC-03:00 (Brasília, Argentina)"},
-  {-120, "UTC-02:00 (Fernando de Noronha)"},
-  {-60,  "UTC-01:00 (Açores)"},
-  {0,    "UTC+00:00 (Lisboa, Londres)"},
-  {60,   "UTC+01:00 (Paris, Berlim)"},
-  {120,  "UTC+02:00 (Atenas, Cairo)"},
-  {180,  "UTC+03:00 (Moscou, Istambul)"},
-  {210,  "UTC+03:30 (Irã)"},
-  {240,  "UTC+04:00 (Dubai)"},
-  {270,  "UTC+04:30 (Afeganistão)"},
-  {300,  "UTC+05:00 (Paquistão)"},
-  {330,  "UTC+05:30 (Índia)"},
-  {345,  "UTC+05:45 (Nepal)"},
-  {360,  "UTC+06:00 (Bangladesh)"},
-  {390,  "UTC+06:30 (Mianmar)"},
-  {420,  "UTC+07:00 (Bangkok)"},
-  {480,  "UTC+08:00 (Pequim, Singapura)"},
-  {540,  "UTC+09:00 (Tóquio)"},
-  {570,  "UTC+09:30 (Adelaide)"},
-  {600,  "UTC+10:00 (Sydney)"},
-  {660,  "UTC+11:00"},
-  {720,  "UTC+12:00 (Auckland)"},
-  {780,  "UTC+13:00"},
-  {840,  "UTC+14:00"}
+static const char FUSO_NOME_0[] PROGMEM = "UTC-12:00";
+static const char FUSO_NOME_1[] PROGMEM = "UTC-11:00";
+static const char FUSO_NOME_2[] PROGMEM = "UTC-10:00 (Havaí)";
+static const char FUSO_NOME_3[] PROGMEM = "UTC-09:00 (Alasca)";
+static const char FUSO_NOME_4[] PROGMEM = "UTC-08:00 (Califórnia)";
+static const char FUSO_NOME_5[] PROGMEM = "UTC-07:00 (Colorado)";
+static const char FUSO_NOME_6[] PROGMEM = "UTC-06:00 (México, Chicago)";
+static const char FUSO_NOME_7[] PROGMEM = "UTC-05:00 (Acre, Nova York, Colômbia)";
+static const char FUSO_NOME_8[] PROGMEM = "UTC-04:00 (Amazonas, Mato Grosso, Venezuela)";
+static const char FUSO_NOME_9[] PROGMEM = "UTC-03:30 (Terra Nova)";
+static const char FUSO_NOME_10[] PROGMEM = "UTC-03:00 (Brasília, Argentina)";
+static const char FUSO_NOME_11[] PROGMEM = "UTC-02:00 (Fernando de Noronha)";
+static const char FUSO_NOME_12[] PROGMEM = "UTC-01:00 (Açores)";
+static const char FUSO_NOME_13[] PROGMEM = "UTC+00:00 (Lisboa, Londres)";
+static const char FUSO_NOME_14[] PROGMEM = "UTC+01:00 (Paris, Berlim)";
+static const char FUSO_NOME_15[] PROGMEM = "UTC+02:00 (Atenas, Cairo)";
+static const char FUSO_NOME_16[] PROGMEM = "UTC+03:00 (Moscou, Istambul)";
+static const char FUSO_NOME_17[] PROGMEM = "UTC+03:30 (Irã)";
+static const char FUSO_NOME_18[] PROGMEM = "UTC+04:00 (Dubai)";
+static const char FUSO_NOME_19[] PROGMEM = "UTC+04:30 (Afeganistão)";
+static const char FUSO_NOME_20[] PROGMEM = "UTC+05:00 (Paquistão)";
+static const char FUSO_NOME_21[] PROGMEM = "UTC+05:30 (Índia)";
+static const char FUSO_NOME_22[] PROGMEM = "UTC+05:45 (Nepal)";
+static const char FUSO_NOME_23[] PROGMEM = "UTC+06:00 (Bangladesh)";
+static const char FUSO_NOME_24[] PROGMEM = "UTC+06:30 (Mianmar)";
+static const char FUSO_NOME_25[] PROGMEM = "UTC+07:00 (Bangkok)";
+static const char FUSO_NOME_26[] PROGMEM = "UTC+08:00 (Pequim, Singapura)";
+static const char FUSO_NOME_27[] PROGMEM = "UTC+09:00 (Tóquio)";
+static const char FUSO_NOME_28[] PROGMEM = "UTC+09:30 (Adelaide)";
+static const char FUSO_NOME_29[] PROGMEM = "UTC+10:00 (Sydney)";
+static const char FUSO_NOME_30[] PROGMEM = "UTC+11:00";
+static const char FUSO_NOME_31[] PROGMEM = "UTC+12:00 (Auckland)";
+static const char FUSO_NOME_32[] PROGMEM = "UTC+13:00";
+static const char FUSO_NOME_33[] PROGMEM = "UTC+14:00";
+static const Fuso FUSOS[] = {   // nome na flash: use FPSTR(FUSOS[k].nome)
+  {-720, FUSO_NOME_0},
+  {-660, FUSO_NOME_1},
+  {-600, FUSO_NOME_2},
+  {-540, FUSO_NOME_3},
+  {-480, FUSO_NOME_4},
+  {-420, FUSO_NOME_5},
+  {-360, FUSO_NOME_6},
+  {-300, FUSO_NOME_7},
+  {-240, FUSO_NOME_8},
+  {-210, FUSO_NOME_9},
+  {-180, FUSO_NOME_10},
+  {-120, FUSO_NOME_11},
+  {-60, FUSO_NOME_12},
+  {0, FUSO_NOME_13},
+  {60, FUSO_NOME_14},
+  {120, FUSO_NOME_15},
+  {180, FUSO_NOME_16},
+  {210, FUSO_NOME_17},
+  {240, FUSO_NOME_18},
+  {270, FUSO_NOME_19},
+  {300, FUSO_NOME_20},
+  {330, FUSO_NOME_21},
+  {345, FUSO_NOME_22},
+  {360, FUSO_NOME_23},
+  {390, FUSO_NOME_24},
+  {420, FUSO_NOME_25},
+  {480, FUSO_NOME_26},
+  {540, FUSO_NOME_27},
+  {570, FUSO_NOME_28},
+  {600, FUSO_NOME_29},
+  {660, FUSO_NOME_30},
+  {720, FUSO_NOME_31},
+  {780, FUSO_NOME_32},
+  {840, FUSO_NOME_33}
 };
 static const uint8_t FUSO_COUNT = sizeof(FUSOS) / sizeof(FUSOS[0]);
 
@@ -616,15 +677,47 @@ static const uint8_t FUSO_COUNT = sizeof(FUSOS) / sizeof(FUSOS[0]);
 // Menu com uma linha por seção (ícone, nome e resumo do estado); cada seção abre em /config?s=<id>.
 // O menu separa as seções em grupos: depois da 3ª e da 6ª começa um grupo novo.
 struct SecaoCfg { const char* id; const char* nome; const char* icone; const char* cor; };
-static const SecaoCfg SECOES[] = {
-  {"clima",   "Cidade e clima",    "⛅",  "#4fc3f7"},
-  {"display", "Display",           "🖥️", "#ffb74d"},
-  {"hora",    "Data e hora",       "🕒",  "#9fa8da"},
-  {"bateria", "Bateria e energia", "🔋",  "#66bb6a"},
-  {"painel",  "Painel web",        "📡",  "#ce93d8"},
-  {"wifi",    "WiFi",              "📶",  "#81d4fa"},
-  {"led",     "LED de status",     "💡",  "#90a4ae"},
-  {"sistema", "Sistema",           "⚙️", "#78909c"},
+static const char SEC_ID_0[] PROGMEM = "clima";
+static const char SEC_NOME_0[] PROGMEM = "Cidade e clima";
+static const char SEC_ICONE_0[] PROGMEM = "⛅";
+static const char SEC_COR_0[] PROGMEM = "#4fc3f7";
+static const char SEC_ID_1[] PROGMEM = "display";
+static const char SEC_NOME_1[] PROGMEM = "Display";
+static const char SEC_ICONE_1[] PROGMEM = "🖥️";
+static const char SEC_COR_1[] PROGMEM = "#ffb74d";
+static const char SEC_ID_2[] PROGMEM = "hora";
+static const char SEC_NOME_2[] PROGMEM = "Data e hora";
+static const char SEC_ICONE_2[] PROGMEM = "🕒";
+static const char SEC_COR_2[] PROGMEM = "#9fa8da";
+static const char SEC_ID_3[] PROGMEM = "bateria";
+static const char SEC_NOME_3[] PROGMEM = "Bateria e energia";
+static const char SEC_ICONE_3[] PROGMEM = "🔋";
+static const char SEC_COR_3[] PROGMEM = "#66bb6a";
+static const char SEC_ID_4[] PROGMEM = "painel";
+static const char SEC_NOME_4[] PROGMEM = "Painel web";
+static const char SEC_ICONE_4[] PROGMEM = "📡";
+static const char SEC_COR_4[] PROGMEM = "#ce93d8";
+static const char SEC_ID_5[] PROGMEM = "wifi";
+static const char SEC_NOME_5[] PROGMEM = "WiFi";
+static const char SEC_ICONE_5[] PROGMEM = "📶";
+static const char SEC_COR_5[] PROGMEM = "#81d4fa";
+static const char SEC_ID_6[] PROGMEM = "led";
+static const char SEC_NOME_6[] PROGMEM = "LED de status";
+static const char SEC_ICONE_6[] PROGMEM = "💡";
+static const char SEC_COR_6[] PROGMEM = "#90a4ae";
+static const char SEC_ID_7[] PROGMEM = "sistema";
+static const char SEC_NOME_7[] PROGMEM = "Sistema";
+static const char SEC_ICONE_7[] PROGMEM = "⚙️";
+static const char SEC_COR_7[] PROGMEM = "#78909c";
+static const SecaoCfg SECOES[] = {   // textos na flash: use FPSTR(SECOES[k].campo)
+  {SEC_ID_0, SEC_NOME_0, SEC_ICONE_0, SEC_COR_0},
+  {SEC_ID_1, SEC_NOME_1, SEC_ICONE_1, SEC_COR_1},
+  {SEC_ID_2, SEC_NOME_2, SEC_ICONE_2, SEC_COR_2},
+  {SEC_ID_3, SEC_NOME_3, SEC_ICONE_3, SEC_COR_3},
+  {SEC_ID_4, SEC_NOME_4, SEC_ICONE_4, SEC_COR_4},
+  {SEC_ID_5, SEC_NOME_5, SEC_ICONE_5, SEC_COR_5},
+  {SEC_ID_6, SEC_NOME_6, SEC_ICONE_6, SEC_COR_6},
+  {SEC_ID_7, SEC_NOME_7, SEC_ICONE_7, SEC_COR_7},
 };
 static const uint8_t SECOES_TOTAL = sizeof(SECOES) / sizeof(SECOES[0]);
 
@@ -956,7 +1049,7 @@ void setup() {
   wifiManager.setConfigPortalTimeout(180);
   ledRede = LED_CONECTANDO;             // pisca rápido enquanto conecta (e com o portal aberto)
   if (WiFi.SSID().length() > 0) {       // há uma rede salva na flash
-    Serial.println("Conectando a " + WiFi.SSID() + "...");
+    Serial.println(F("Conectando a ") + WiFi.SSID() + F("..."));
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);        // o próprio ESP fica tentando reconectar
     WiFi.begin();                       // usa a rede salva
@@ -984,6 +1077,7 @@ void setup() {
   // (iniciaOta(), também chamada pelo loop quando o WiFi conecta depois do boot).
   ArduinoOTA.setHostname(hostname.c_str());
   ArduinoOTA.setPassword(OTA_SENHA);   // senha definida em WeatherStationConfig.h
+  ArduinoOTA.onStart([]() { ecoAcorda(10UL * 60UL * 1000UL); });   // gravação pelo WiFi sem light sleep (economia na bateria)
 
   if (WiFi.status() == WL_CONNECTED) {
     ledRede = LED_NORMAL;               // conectou
@@ -1035,32 +1129,38 @@ void setup() {
   if (bateriaAtiva) atualizaBateria();
   updateData(&display);
 
-  server.on("/", HTTP_GET, paginaInicial);
-  server.on("/json", HTTP_GET, paginaJson);
-  server.on("/historico", HTTP_GET, paginaHistorico);
-  server.on("/config", HTTP_GET, paginaConfig);
-  server.on("/salvar", HTTP_POST, handleSalvar);
-  server.on("/display", HTTP_POST, handleDisplay);
-  server.on("/agenda", HTTP_POST, handleAgenda);
-  server.on("/tempotela", HTTP_POST, handleTempoTela);
-  server.on("/tempoligada", HTTP_POST, handleTempoLigada);
-  server.on("/bateria", HTTP_POST, handleBateria);
-  server.on("/led", HTTP_POST, handleLed);
-  server.on("/brilho", HTTP_POST, handleBrilho);
-  server.on("/telas", HTTP_POST, handleTelas);
-  server.on("/hora", HTTP_POST, handleHora);
-  server.on("/buscar-cidade", HTTP_GET, handleBuscaCidade);
-  server.on("/api", HTTP_POST, handleApi);
-  server.on("/enviar", HTTP_POST, handleEnviar);
-  server.on("/reset-wifi", HTTP_POST, handleResetWiFi);
-  server.on("/reset-geral", HTTP_POST, handleResetGeral);
-  server.on("/portal", HTTP_POST, handlePortal);
-  server.on("/login", HTTP_GET, paginaLogin);
-  server.on("/login", HTTP_POST, handleLogin);
-  server.on("/sair", HTTP_POST, handleSair);
-  server.on("/sair-todos", HTTP_POST, handleSairTodos);
+  server.on(F("/"), HTTP_GET, paginaInicial);
+  server.on(F("/json"), HTTP_GET, paginaJson);
+  server.on(F("/historico"), HTTP_GET, paginaHistorico);
+  server.on(F("/config"), HTTP_GET, paginaConfig);
+  server.on(F("/salvar"), HTTP_POST, handleSalvar);
+  server.on(F("/display"), HTTP_POST, handleDisplay);
+  server.on(F("/agenda"), HTTP_POST, handleAgenda);
+  server.on(F("/tempotela"), HTTP_POST, handleTempoTela);
+  server.on(F("/tempoligada"), HTTP_POST, handleTempoLigada);
+  server.on(F("/bateria"), HTTP_POST, handleBateria);
+  server.on(F("/economia"), HTTP_POST, handleEconomia);
+  server.on(F("/led"), HTTP_POST, handleLed);
+  server.on(F("/brilho"), HTTP_POST, handleBrilho);
+  server.on(F("/telas"), HTTP_POST, handleTelas);
+  server.on(F("/hora"), HTTP_POST, handleHora);
+  server.on(F("/buscar-cidade"), HTTP_GET, handleBuscaCidade);
+  server.on(F("/api"), HTTP_POST, handleApi);
+  server.on(F("/enviar"), HTTP_POST, handleEnviar);
+  server.on(F("/reset-wifi"), HTTP_POST, handleResetWiFi);
+  server.on(F("/reset-geral"), HTTP_POST, handleResetGeral);
+  server.on(F("/portal"), HTTP_POST, handlePortal);
+  server.on(F("/login"), HTTP_GET, paginaLogin);
+  server.on(F("/login"), HTTP_POST, handleLogin);
+  server.on(F("/sair"), HTTP_POST, handleSair);
+  server.on(F("/sair-todos"), HTTP_POST, handleSairTodos);
   // Origin/Referer: requisicaoSegura() (proteção contra CSRF); Cookie: logado() (login da /config)
   server.collectHeaders("Origin", "Referer", "Cookie");   // forma do core 3.x (lista de nomes)
+  // Economia na bateria: qualquer acesso à página acorda o ESP e o mantém acordado por ECO_ACORDADO_MS
+  server.addHook([](const String&, const String&, WiFiClient*, ESP8266WebServer::ContentTypeFunction) {
+    ecoAcorda(ECO_ACORDADO_MS);
+    return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
+  });
   server.begin();
 }
 
@@ -1079,6 +1179,7 @@ void loop() {
   verificaTimerTela(ms);                   // apaga a tela quando o tempo de tela ligada acabar
   bool mostrandoMsg = trataMensagemTela(ms);   // mensagem temporária no OLED (ex.: resultado do envio)
   atualizaEnergia(ms);                     // sensor de energia da UPS: energia externa conectada ou bateria
+  atualizaEco(ms);                         // na bateria: light sleep do WiFi quando ninguém está usando
 
   // Estado da rede: pisca devagar se o WiFi cair (como em interruptores inteligentes)
   if ((long)(ms - nextRede) >= 0) {
@@ -1125,7 +1226,7 @@ void loop() {
   if ((long)(ms - nextApi) >= 0) {
     if (apiUrl.length() > 0 && deviceKey.length() > 0) {
       bool ok = enviaParaApi();
-      nextApi = ms + (ok ? PAINEL_INTERVAL_MS : PAINEL_RETRY_MS);
+      nextApi = ms + (ok ? intervaloEnvioMs() : PAINEL_RETRY_MS);
     } else {
       nextApi = ms + 60000UL;           // API não configurada: confere de novo em 1 min
     }
@@ -1156,7 +1257,7 @@ void loop() {
       delay(remainingTimeBudget);
     }
   } else {
-    delay(50);                          // tela apagada: não gasta CPU nem I2C desenhando
+    delay(ecoDormindo ? ECO_LOOP_MS : 50);   // tela apagada: não gasta CPU nem I2C desenhando (dormindo: pausa maior, mais economia)
   }
 }
 
@@ -1217,6 +1318,10 @@ void carregaConfig() {
     cidadeLat = c.lat;
     cidadeLon = c.lon;
   }
+  if (c.ecoOk == 0xA5) {
+    ecoBateria = (c.eco == 1);
+    if (ecoIntervaloValido(c.ecoIntervalo)) ecoIntervaloMin = c.ecoIntervalo;
+  }
   if (c.agendaLiga < 1440 && c.agendaDesliga < 1440) {   // dados antigos/vazios são ignorados
     agendaLiga = c.agendaLiga;
     agendaDesliga = c.agendaDesliga;
@@ -1264,6 +1369,9 @@ void salvaConfig() {
   c.coordOk = coordOk ? 0xA5 : 0;
   c.lat = cidadeLat;
   c.lon = cidadeLon;
+  c.ecoOk = 0xA5;
+  c.eco = ecoBateria ? 1 : 0;
+  c.ecoIntervalo = ecoIntervaloMin;
   EEPROM.put(0, c);
   EEPROM.commit();
 }
@@ -1433,7 +1541,7 @@ void enviarPeloBotao() {
   envioNaTela = true;                      // enviaParaApiInterno() desenha as etapas (preparando, conectando)
   bool ok = enviaParaApi();
   envioNaTela = false;
-  if (ok) nextApi = millis() + PAINEL_INTERVAL_MS;                 // recomeça o ciclo do envio automático
+  if (ok) nextApi = millis() + intervaloEnvioMs();                 // recomeça o ciclo do envio automático
   msgTipo = ok ? MSG_ENVIO_OK : MSG_ENVIO_FALHA;                   // tela de resultado com ícone, código HTTP e tempo
   mostraMensagemTela("", "", "", TELA_MENSAGEM_MS);
 }
@@ -1463,6 +1571,7 @@ bool trataBotoes(unsigned long ms) {
       }
     }
 
+    if (mudou && btnEstado[i]) ecoAcorda(ECO_ACORDADO_MS);   // apertou: fica acordado (economia na bateria)
     if (mudou && !btnEstado[i] && ms - btnDesde[i] < BOTAO_AVISO_MS) {   // soltou depois de um clique curto (segurar e soltar cancela)
       if (i == 0) proximaTela();                        // botão das telas: próxima tela
       else enviarPeloBotao();                           // botão de reset geral: envia os dados ao painel
@@ -1497,16 +1606,16 @@ void varreduraI2C() {
 /** Nome do pino na placa a partir do número do GPIO (ex.: 14 -> 'D5 (GPIO14)'), para as mensagens. */
 String nomePino(int gpio) {
   switch (gpio) {
-    case 16: return "D0 (GPIO16)";
-    case 5:  return "D1 (GPIO5)";
-    case 4:  return "D2 (GPIO4)";
-    case 0:  return "D3 (GPIO0)";
-    case 2:  return "D4 (GPIO2)";
-    case 14: return "D5 (GPIO14)";
-    case 12: return "D6 (GPIO12)";
-    case 13: return "D7 (GPIO13)";
-    case 15: return "D8 (GPIO15)";
-    default: return "GPIO" + String(gpio);
+    case 16: return F("D0 (GPIO16)");
+    case 5:  return F("D1 (GPIO5)");
+    case 4:  return F("D2 (GPIO4)");
+    case 0:  return F("D3 (GPIO0)");
+    case 2:  return F("D4 (GPIO2)");
+    case 14: return F("D5 (GPIO14)");
+    case 12: return F("D6 (GPIO12)");
+    case 13: return F("D7 (GPIO13)");
+    case 15: return F("D8 (GPIO15)");
+    default: return F("GPIO") + String(gpio);
   }
 }
 
@@ -1518,7 +1627,7 @@ void leSensor() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(h) || isnan(t)) {
-    Serial.println("Falhou a leitura do sensor " SENSOR_NOME "!");
+    Serial.println(F("Falhou a leitura do sensor " SENSOR_NOME "!"));
     sensorUltimaOk = false;             // o painel é avisado pelo campo sensor_ok
     return;                             // mantém o último valor válido
   }
@@ -1582,18 +1691,18 @@ void atualizaBateria() {
 }
 
 /** Texto descritivo da faixa de tensão da bateria (mostrado na seção Bateria e energia). */
-const char* bateriaSituacao(float v) {
-  if (v >= 4.15) return "Totalmente carregada";
-  if (v >= 4.06) return "Carga alta";
-  if (v >= 3.98) return "Carga alta / boa";
-  if (v >= 3.89) return "Carga média-alta";
-  if (v >= 3.80) return "Carga média";
-  if (v >= 3.72) return "Meia carga";
-  if (v >= 3.65) return "Carga moderada";
-  if (v >= 3.58) return "Carga baixa";
-  if (v >= 3.39) return "Nível crítico (recomenda-se recarregar)";
-  if (v >= 3.20) return "Muito baixa";
-  return "Descarga profunda (risco de danificar a célula)";
+const __FlashStringHelper* bateriaSituacao(float v) {
+  if (v >= 4.15) return F("Totalmente carregada");
+  if (v >= 4.06) return F("Carga alta");
+  if (v >= 3.98) return F("Carga alta / boa");
+  if (v >= 3.89) return F("Carga média-alta");
+  if (v >= 3.80) return F("Carga média");
+  if (v >= 3.72) return F("Meia carga");
+  if (v >= 3.65) return F("Carga moderada");
+  if (v >= 3.58) return F("Carga baixa");
+  if (v >= 3.39) return F("Nível crítico (recomenda-se recarregar)");
+  if (v >= 3.20) return F("Muito baixa");
+  return F("Descarga profunda (risco de danificar a célula)");
 }
 
 // ---- ENERGIA EXTERNA (placa UPS) ----------------------------------------------------------
@@ -1628,8 +1737,52 @@ void atualizaEnergia(unsigned long ms) {
   }
   if (energiaContagem >= 3 && presente != energiaExterna) {
     energiaExterna = presente;
-    Serial.println(presente ? "Energia externa conectada (5 V)" : "Sem energia externa: rodando na bateria");
+    Serial.println(presente ? F("Energia externa conectada (5 V)") : F("Sem energia externa: rodando na bateria"));
   }
+}
+
+// ---- ECONOMIA NA BATERIA (light sleep do WiFi) --------------------------------------------
+
+/** true = a placa UPS está ativa e não há energia externa (o ESP está rodando na bateria). */
+bool naBateria() {
+  return energiaAtiva && PIN_ENERGIA >= 0 && !energiaExterna;
+}
+
+/** Intervalos aceitos para o envio ao painel na bateria (minutos). */
+bool ecoIntervaloValido(int m) {
+  return m == 15 || m == 20 || m == 30 || m == 45 || m == 60;
+}
+
+/** Intervalo do envio automático ao painel: o normal ou, na bateria com a economia ligada, o da economia. */
+unsigned long intervaloEnvioMs() {
+  return (ecoBateria && naBateria()) ? (unsigned long)ecoIntervaloMin * 60000UL : PAINEL_INTERVAL_MS;
+}
+
+/**
+ * Mantém o ESP acordado (WiFi sem light sleep) por 'dur' ms a partir de agora. Chamada a cada
+ * acesso à página, clique num botão, envio ao painel, consulta do clima e OTA. Se já estava
+ * dormindo, acorda na hora.
+ */
+void ecoAcorda(unsigned long dur) {
+  unsigned long ate = millis() + dur;
+  if ((long)(ate - ecoAcordadoAte) > 0) ecoAcordadoAte = ate;
+  if (ecoDormindo) {
+    WiFi.setSleepMode(WIFI_MODEM_SLEEP);
+    ecoDormindo = false;
+    Serial.println(F("Economia: acordado"));
+  }
+}
+
+/**
+ * Chamada a cada volta do loop(): liga o light sleep quando está na bateria, com a economia ligada,
+ * com WiFi conectado e sem nenhum acesso recente; volta ao modo normal (modem sleep) caso contrário.
+ */
+void atualizaEco(unsigned long ms) {
+  bool dormir = ecoBateria && naBateria() && WiFi.status() == WL_CONNECTED && (long)(ms - ecoAcordadoAte) >= 0;
+  if (dormir == ecoDormindo) return;
+  WiFi.setSleepMode(dormir ? WIFI_LIGHT_SLEEP : WIFI_MODEM_SLEEP);
+  ecoDormindo = dormir;
+  Serial.println(dormir ? F("Economia: light sleep (na bateria)") : F("Economia: modo normal"));
 }
 
 // ---- CLIMA (OpenWeatherMap) ---------------------------------------------------------------
@@ -1640,6 +1793,7 @@ void atualizaEnergia(unsigned long ms) {
  * próxima consulta (ou nova tentativa se falhar).
  */
 void updateData(OLEDDisplay *display) {
+  ecoAcorda(30000UL);                    // consulta do clima sem light sleep
   readyForWeatherUpdate = false;
   static bool primeiraVez = true;        // 1ª consulta = a do boot: mostra avisos mais longos no OLED
   bool noBoot = primeiraVez;
@@ -1659,7 +1813,7 @@ void updateData(OLEDDisplay *display) {
       display->setFont(ArialMT_Plain_10);
       display->drawString(64, 2, F("Sem chave da API"));
       display->drawString(64, 18, F("Abra no navegador:"));
-      display->drawString(64, 32, WiFi.localIP().toString() + "/config");
+      display->drawString(64, 32, WiFi.localIP().toString() + F("/config"));
       display->display();
       delay(3500);
     }
@@ -1675,7 +1829,7 @@ void updateData(OLEDDisplay *display) {
     return;
   }
 
-  drawProgress(display, 20, "Atualizando o clima...");
+  drawProgress(display, 20, F("Atualizando o clima..."));
   String cidadeAnterior = currentWeather.cityName;
   currentWeather.cityName = "";          // se continuar vazio depois, a consulta falhou
   // Por coordenadas quando já são conhecidas (a consulta por ID é obsoleta); na 1ª vez, pelo ID da cidade
@@ -1692,7 +1846,7 @@ void updateData(OLEDDisplay *display) {
     Serial.printf_P(PSTR("Coordenadas da cidade: %.4f, %.4f\n"), cidadeLat, cidadeLon);
   }
 
-  drawProgress(display, 60, "Atualizando previsões...");
+  drawProgress(display, 60, F("Atualizando previsões..."));
   // Todos os blocos de 3 h (até 4 dias), numa consulta só; a memória é liberada logo depois
   OpenWeatherMapForecastData* blocos = new (std::nothrow) OpenWeatherMapForecastData[MAX_BLOCOS_PREVISAO]();
   if (blocos) {
@@ -1707,7 +1861,7 @@ void updateData(OLEDDisplay *display) {
 
   if (weatherOk) climaRecebido = true;
   else if (climaRecebido) currentWeather.cityName = cidadeAnterior;   // falhou: o OLED segue com os últimos dados bons
-  drawProgress(display, 100, weatherOk ? "Pronto..." : "Falha ao obter o clima");
+  drawProgress(display, 100, weatherOk ? F("Pronto...") : F("Falha ao obter o clima"));
   delay(noBoot ? (weatherOk ? 700 : 2500) : 300);   // no boot a tela de progresso fica visível por mais tempo
 
   nextWeatherUpdate = millis() + (weatherOk ? UPDATE_INTERVAL_MS : API_RETRY_MS);
@@ -1826,7 +1980,7 @@ void drawProgress(OLEDDisplay *display, int percentage, String label) {
  */
 void desenhaMensagemTela() {
   if (msgTipo == MSG_IP) { desenhaTelaIp(); return; }
-  if (msgTipo == MSG_ENVIO_ANDAMENTO) { desenhaEnvioEtapa(5, "Iniciando..."); return; }
+  if (msgTipo == MSG_ENVIO_ANDAMENTO) { desenhaEnvioEtapa(5, F("Iniciando...")); return; }
   if (msgTipo == MSG_ENVIO_OK || msgTipo == MSG_ENVIO_FALHA) { desenhaResultadoEnvio(); return; }
   display.clear();
   display.setTextAlignment(TEXT_ALIGN_CENTER);
@@ -1848,7 +2002,7 @@ void desenhaMensagemTela() {
 // ---- Telas do envio ao painel pelo botão ----
 
 /** Faixa de título invertida (fundo aceso, texto apagado) no topo do OLED, 13 px de altura. */
-void desenhaCabecalho(const char* titulo) {
+void desenhaCabecalho(const String& titulo) {
   display.setColor(WHITE);
   display.fillRect(0, 0, 128, 13);
   display.setColor(BLACK);
@@ -1908,15 +2062,15 @@ String cabeNaLargura(const String& s, int largura) {
  * Tela durante o envio pelo botão: título, nuvem com seta, a etapa atual e uma barra de progresso.
  * Chamada em cada etapa (o envio trava o loop, então a tela é desenhada na hora).
  */
-void desenhaEnvioEtapa(int pct, const char* texto) {
+void desenhaEnvioEtapa(int pct, const String& texto) {
   display.clear();
-  desenhaCabecalho("PAINEL WEB");
+  desenhaCabecalho(F("PAINEL WEB"));
   desenhaIconeNuvemEnvio(16, 30);
   display.setFont(ArialMT_Plain_16);
   display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.drawString(34, 15, F("Enviando"));
   display.setFont(ArialMT_Plain_10);
-  display.drawString(34, 33, cabeNaLargura(String(texto), 94));
+  display.drawString(34, 33, cabeNaLargura(texto, 94));
   display.drawProgressBar(2, 51, 124, 10, pct);
   display.display();
 }
@@ -1928,24 +2082,24 @@ void desenhaEnvioEtapa(int pct, const char* texto) {
 void desenhaResultadoEnvio() {
   bool ok = (msgTipo == MSG_ENVIO_OK);
   display.clear();
-  desenhaCabecalho("PAINEL WEB");
+  desenhaCabecalho(F("PAINEL WEB"));
   if (ok) desenhaIconeOk(14, 38);
   else desenhaIconeFalha(14, 38);
 
   display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.setFont(ArialMT_Plain_16);
-  display.drawString(32, 14, ok ? "Enviado!" : "Falhou");
+  display.drawString(32, 14, ok ? F("Enviado!") : F("Falhou"));
   display.setFont(ArialMT_Plain_10);
 
   // tempo do envio com 1 casa e vírgula (ex.: 1,2 s); 0 = falhou antes de conectar
   String dur = "";
   if (apiUltimoDurMs > 0) {
-    dur = String(apiUltimoDurMs / 1000UL) + "," + String((apiUltimoDurMs % 1000UL) / 100UL) + " s";
+    dur = String(apiUltimoDurMs / 1000UL) + F(",") + String((apiUltimoDurMs % 1000UL) / 100UL) + F(" s");
   }
 
   if (ok) {
-    display.drawString(32, 32, apiUltimoMsg + "  " + dur);
-    String leitura = sensorOk ? String(localTemp, 1) + "°C  " + String(localHum, 0) + "%" : String("sensor sem leitura");
+    display.drawString(32, 32, apiUltimoMsg + F("  ") + dur);
+    String leitura = sensorOk ? String(localTemp, 1) + F("°C  ") + String(localHum, 0) + F("%") : String(F("sensor sem leitura"));
     display.drawString(32, 44, cabeNaLargura(leitura, 96));
   } else {
     String erro = apiUltimoMsg;
@@ -1953,7 +2107,7 @@ void desenhaResultadoEnvio() {
     String l2 = cabeNaLargura(erro.substring(l1.length()), 96);
     display.drawString(32, 32, l1);
     if (l2.length()) display.drawString(32, 44, l2);
-    else display.drawString(32, 44, "Nova tentativa: " + String(PAINEL_RETRY_MS / 60000UL) + " min");
+    else display.drawString(32, 44, F("Nova tentativa: ") + String(PAINEL_RETRY_MS / 60000UL) + F(" min"));
   }
   display.display();
 }
@@ -2003,10 +2157,10 @@ bool horaOk() {
  * Desenha, numa tela de clima, o aviso de que ainda não há dados (com o motivo): sem WiFi, sem
  * chave da API ou aguardando a consulta.
  */
-void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const char* titulo) {
-  const char* motivo = (WiFi.status() != WL_CONNECTED) ? "Sem WiFi"
-                     : (OPEN_WEATHER_MAP_APP_ID.length() == 0) ? "Falta a chave da API"
-                     : "Aguardando dados...";
+void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const String& titulo) {
+  const __FlashStringHelper* motivo = (WiFi.status() != WL_CONNECTED) ? F("Sem WiFi")
+                     : (OPEN_WEATHER_MAP_APP_ID.length() == 0) ? F("Falta a chave da API")
+                     : F("Aguardando dados...");
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 + x, y, titulo);
@@ -2052,8 +2206,8 @@ void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x
   display->drawString(66 + x, 12 + y, F("Temp"));
 
   // Valores com 1 casa decimal; a unidade vai em fonte pequena logo depois, para caber nas duas colunas
-  String hs = sensorOk ? String(localHum, 1) : String("--");
-  String ts = sensorOk ? String(localTemp, 1) : String("--");
+  String hs = sensorOk ? String(localHum, 1) : String(F("--"));
+  String ts = sensorOk ? String(localTemp, 1) : String(F("--"));
   display->setFont(ArialMT_Plain_24);
   int wh = display->getStringWidth(hs);
   int wt = display->getStringWidth(ts);
@@ -2068,14 +2222,14 @@ void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x
 
 /** Tela 3 do OLED: ícone, temperatura, cidade e descrição do clima atual. */
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  if (!climaRecebido) { desenhaSemClima(display, x, y, "CLIMA ATUAL"); return; }
+  if (!climaRecebido) { desenhaSemClima(display, x, y, F("CLIMA ATUAL")); return; }
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 + x, 38 + y, currentWeather.description);
 
   display->setFont(ArialMT_Plain_24);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
-  String temp = String(currentWeather.temp, 1) + (IS_METRIC ? "°C" : "°F");
+  String temp = String(currentWeather.temp, 1) + (IS_METRIC ? F("°C") : F("°F"));
   display->drawString(60 + x, 1 + y, temp);
 
   display->setFont(ArialMT_Plain_10);
@@ -2092,32 +2246,32 @@ void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
  * chuva prevista nas 24 h e vento. Pressão e visibilidade ficam na página web.
  */
 void drawCurrentWeatherDetails(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  if (!climaRecebido) { desenhaSemClima(display, x, y, "PRÓXIMAS 24 H"); return; }
+  if (!climaRecebido) { desenhaSemClima(display, x, y, F("PRÓXIMAS 24 H")); return; }
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 + x, y, F("PRÓXIMAS 24 H"));
   display->setTextAlignment(TEXT_ALIGN_LEFT);
 
-  String unit = IS_METRIC ? "°C" : "°F";
+  String unit = IS_METRIC ? F("°C") : F("°F");
   // Mín/máx: das próximas 24 h (previsão); sem previsão ainda, '--'
-  String mn = prox24Ok ? String(prox24Min, 1) + unit : String("--");
-  String mx = prox24Ok ? String(prox24Max, 1) + unit : String("--");
-  display->drawString(x, 12 + y, "Min: " + mn);
-  display->drawString(x, 24 + y, "Max: " + mx);
-  display->drawString(x, 36 + y, "Umid: " + String(currentWeather.humidity) + "%");
+  String mn = prox24Ok ? String(prox24Min, 1) + unit : String(F("--"));
+  String mx = prox24Ok ? String(prox24Max, 1) + unit : String(F("--"));
+  display->drawString(x, 12 + y, F("Min: ") + mn);
+  display->drawString(x, 24 + y, F("Max: ") + mx);
+  display->drawString(x, 36 + y, F("Umid: ") + String(currentWeather.humidity) + F("%"));
 
   // A API devolve o vento em m/s (metric) ou mph (imperial); a chuva em mm
   float wind = IS_METRIC ? currentWeather.windSpeed * 3.6 : currentWeather.windSpeed;
   // chuva com 1 casa até 9,9 mm e sem casa a partir de 10 mm, para caber na coluna
-  String chuva = prox24Ok ? String(prox24Chuva, prox24Chuva < 9.95f ? 1 : 0) + "mm" : String("--");
-  display->drawString(60 + x, 12 + y, "Sens: " + String(prox24Ok ? prox24Sens : currentWeather.feelsLike, 0) + unit);
-  display->drawString(60 + x, 24 + y, "Chuva: " + chuva);
-  display->drawString(60 + x, 36 + y, "Ven: " + String(wind, 0) + (IS_METRIC ? "km/h" : "mph"));
+  String chuva = prox24Ok ? String(prox24Chuva, prox24Chuva < 9.95f ? 1 : 0) + F("mm") : String(F("--"));
+  display->drawString(60 + x, 12 + y, F("Sens: ") + String(prox24Ok ? prox24Sens : currentWeather.feelsLike, 0) + unit);
+  display->drawString(60 + x, 24 + y, F("Chuva: ") + chuva);
+  display->drawString(60 + x, 36 + y, F("Ven: ") + String(wind, 0) + (IS_METRIC ? F("km/h") : F("mph")));
 }
 
 /** Tela 5 do OLED: previsão dos próximos 3 dias (usa drawForecastDetails para cada dia). */
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  if (!climaRecebido) { desenhaSemClima(display, x, y, "PRÓXIMOS DIAS"); return; }
+  if (!climaRecebido) { desenhaSemClima(display, x, y, F("PRÓXIMOS DIAS")); return; }
   drawForecastDetails(display, x, y, 0);
   drawForecastDetails(display, x + 44, y, 1);
   drawForecastDetails(display, x + 88, y, 2);
@@ -2140,7 +2294,7 @@ void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
 
   display->setFont(Meteocons_Plain_21);
   display->drawString(x + 20, y + 12, forecasts[dayIndex].iconMeteoCon);
-  String temp = String(forecasts[dayIndex].temp, 0) + (IS_METRIC ? "°C" : "°F");
+  String temp = String(forecasts[dayIndex].temp, 0) + (IS_METRIC ? F("°C") : F("°F"));
   display->setFont(ArialMT_Plain_10);
   display->drawString(x + 20, y + 34, temp);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
@@ -2160,7 +2314,7 @@ void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_
   // Linha 1: bateria
   if (bateriaAtiva) {
     drawBateria(display, x, y + 2, bateriaPct);
-    display->drawString(x + 24, y, String(bateriaPct) + "%  " + String(bateriaV, 2) + "V");
+    display->drawString(x + 24, y, String(bateriaPct) + F("%  ") + String(bateriaV, 2) + F("V"));
   } else {
     display->drawString(x, y, F("Bateria: desativada"));
   }
@@ -2200,7 +2354,7 @@ void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->drawString(0, 54, String(buff));
   display->setTextAlignment(TEXT_ALIGN_RIGHT);
-  String temp = (climaRecebido ? String(currentWeather.temp, 0) : String("--")) + (IS_METRIC ? "°C" : "°F");   // '--°C' até chegar o clima
+  String temp = (climaRecebido ? String(currentWeather.temp, 0) : String(F("--"))) + (IS_METRIC ? F("°C") : F("°F"));   // '--°C' até chegar o clima
   display->drawString(128, 54, temp);
   display->drawHorizontalLine(0, 52, 128);
   desenhaIndicadores(display, state);
@@ -2227,7 +2381,7 @@ void desenhaIndicadores(OLEDDisplay *display, OLEDDisplayUiState* state) {
 
 /** Hora local 'HH:MM' de um instante (ou '--:--' se ainda não houver o valor). */
 String horaCurta(time_t t) {
-  if (t <= 0) return "--:--";
+  if (t <= 0) return F("--:--");
   struct tm* ti = localtime(&t);
   char b[8];
   snprintf(b, sizeof(b), "%02d:%02d", ti->tm_hour, ti->tm_min);
@@ -2235,10 +2389,17 @@ String horaCurta(time_t t) {
 }
 
 /** Nome da fase da Lua (0 = nova, 4 = cheia), como devolvido por Astronomy::calculateMoonData. */
-const char* nomeFaseLua(uint8_t fase) {
-  static const char* const NOMES[] = {"Lua nova", "Crescente", "Quarto crescente", "Crescente gibosa",
-                                      "Lua cheia", "Minguante gibosa", "Quarto minguante", "Minguante"};
-  return NOMES[fase & 7];
+const __FlashStringHelper* nomeFaseLua(uint8_t fase) {
+  static const char N0[] PROGMEM = "Lua nova";
+  static const char N1[] PROGMEM = "Crescente";
+  static const char N2[] PROGMEM = "Quarto crescente";
+  static const char N3[] PROGMEM = "Crescente gibosa";
+  static const char N4[] PROGMEM = "Lua cheia";
+  static const char N5[] PROGMEM = "Minguante gibosa";
+  static const char N6[] PROGMEM = "Quarto minguante";
+  static const char N7[] PROGMEM = "Minguante";
+  static const char* const NOMES[] = {N0, N1, N2, N3, N4, N5, N6, N7};
+  return FPSTR(NOMES[fase & 7]);
 }
 
 /**
@@ -2325,22 +2486,22 @@ void drawSolLua(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int1
   // Linha 1: sol (nascer e pôr)   Linha 2: Lua (nascer e pôr)
   desenhaSolPequeno(display, 5 + x, 6 + y);
   desenhaSeta(display, 14 + x, y, true);
-  display->drawString(21 + x, y, astroOk ? horaCurta(solNasce) : String("--:--"));
+  display->drawString(21 + x, y, astroOk ? horaCurta(solNasce) : String(F("--:--")));
   desenhaSeta(display, 54 + x, y, false);
-  display->drawString(61 + x, y, astroOk ? horaCurta(solPoe) : String("--:--"));
+  display->drawString(61 + x, y, astroOk ? horaCurta(solPoe) : String(F("--:--")));
 
   desenhaLuaPequena(display, 5 + x, 18 + y);
   desenhaSeta(display, 14 + x, 12 + y, true);
-  display->drawString(21 + x, 12 + y, astroOk ? horaCurta(luaNasce) : String("--:--"));
+  display->drawString(21 + x, 12 + y, astroOk ? horaCurta(luaNasce) : String(F("--:--")));
   desenhaSeta(display, 54 + x, 12 + y, false);
-  display->drawString(61 + x, 12 + y, astroOk ? horaCurta(luaPoe) : String("--:--"));
+  display->drawString(61 + x, 12 + y, astroOk ? horaCurta(luaPoe) : String(F("--:--")));
 
   // Embaixo: a Lua com a fase, o nome e a iluminação
   bool sul = coordOk ? (cidadeLat < 0) : true;   // sem coordenadas: hemisfério sul (padrão do projeto, Brasil)
   if (luaOk) desenhaLua(display, 15 + x, 38 + y, 12, luaFase, luaIlum, sul);
   else display->drawCircle(15 + x, 38 + y, 12);
-  display->drawString(34 + x, 26 + y, luaOk ? String(nomeFaseLua(luaFase)) : String("Aguardando a hora"));
-  display->drawString(34 + x, 38 + y, luaOk ? "Iluminada: " + String((int)(luaIlum * 100 + 0.5f)) + "%" : String("--"));
+  display->drawString(34 + x, 26 + y, luaOk ? String(nomeFaseLua(luaFase)) : String(F("Aguardando a hora")));
+  display->drawString(34 + x, 38 + y, luaOk ? F("Iluminada: ") + String((int)(luaIlum * 100 + 0.5f)) + F("%") : String(F("--")));
 }
 
 // ---- Escolha das telas ---------------------------------------------------------------------
@@ -2409,13 +2570,13 @@ void desenhaTelaIp() {
   int rssi = WiFi.RSSI();
   int pct = getRSSIasQuality(rssi);
   display.clear();
-  desenhaCabecalho("WIFI CONECTADO");
+  desenhaCabecalho(F("WIFI CONECTADO"));
   desenhaIconeWiFiGrande(4, 15, pct);
 
   display.setFont(ArialMT_Plain_10);
   display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.drawString(32, 13, cabeNaLargura(WiFi.SSID(), 94));
-  display.drawString(32, 23, String(rssi) + " dBm  " + String(pct) + "%");
+  display.drawString(32, 23, String(rssi) + F(" dBm  ") + String(pct) + F("%"));
 
   String ip = WiFi.localIP().toString();
   display.setTextAlignment(TEXT_ALIGN_CENTER);
@@ -2585,7 +2746,7 @@ String idDispositivo() {
   if (apiDeviceId.length() > 0) return apiDeviceId;
   String id = String(ESP.getChipId(), HEX);
   id.toLowerCase();
-  return "esp8266-" + id;               // padrão, se nenhum ID foi salvo em /config
+  return F("esp8266-") + id;               // padrão, se nenhum ID foi salvo em /config
 }
 
 /**
@@ -2606,40 +2767,40 @@ String montaPayloadApi() {
   String j;
   j.reserve(800);
   // ---- campos principais ----
-  j += "{\"device_id\":\"" + jsonEscape(idDispositivo()) + "\"";
-  j += ",\"temperature\":" + String(localTemp, 1);
-  j += ",\"humidity\":" + String(localHum, 1);
+  j += F("{\"device_id\":\"") + jsonEscape(idDispositivo()) + F("\"");
+  j += F(",\"temperature\":") + String(localTemp, 1);
+  j += F(",\"humidity\":") + String(localHum, 1);
   j += F(",\"city_id\":");
-  j += soDigitos ? cid : String("null");
-  j += ",\"city_name\":\"" + jsonEscape(currentWeather.cityName) + "\"";
+  j += soDigitos ? cid : String(F("null"));
+  j += F(",\"city_name\":\"") + jsonEscape(currentWeather.cityName) + F("\"");
   // Coordenadas da cidade (null até serem conhecidas): o painel consulta o clima por elas e,
   // sem city_id (cidade escolhida pela busca ou por latitude/longitude), identifica a cidade por elas
   j += F(",\"lat\":");
-  j += coordOk ? String(cidadeLat, 4) : String("null");
+  j += coordOk ? String(cidadeLat, 4) : String(F("null"));
   j += F(",\"lon\":");
-  j += coordOk ? String(cidadeLon, 4) : String("null");
-  j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
-  j += ",\"rssi\":" + String(rssi);
-  j += ",\"firmware\":\"" FIRMWARE_VERSAO "\"";
+  j += coordOk ? String(cidadeLon, 4) : String(F("null"));
+  j += F(",\"ip\":\"") + WiFi.localIP().toString() + F("\"");
+  j += F(",\"rssi\":") + String(rssi);
+  j += F(",\"firmware\":\"" FIRMWARE_VERSAO "\"");
   // ---- bateria ----
   j += F(",\"battery_active\":");
-  j += bateriaAtiva ? "true" : "false";
-  j += ",\"battery\":" + String(bateriaAtiva ? bateriaPct : 0);
-  j += ",\"battery_voltage\":" + String(bateriaAtiva ? bateriaV : 0.0f, 2);
+  j += bateriaAtiva ? F("true") : F("false");
+  j += F(",\"battery\":") + String(bateriaAtiva ? bateriaPct : 0);
+  j += F(",\"battery_voltage\":") + String(bateriaAtiva ? bateriaV : 0.0f, 2);
   // ---- energia, sensor e saúde do ESP ----
   j += F(",\"external_power\":");                 // true = energia externa (5 V); false = bateria; null = ESP sem o sensor
-  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? "true" : "false";
+  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? F("true") : F("false");
   else j += F("null");
   j += F(",\"sensor_ok\":");                      // false = a última leitura do sensor falhou (temperature/humidity repetem o último valor)
-  j += sensorUltimaOk ? "true" : "false";
-  j += ",\"uptime_s\":" + String(millis() / 1000UL);
-  j += ",\"reset_reason\":\"" + jsonEscape(ESP.getResetReason()) + "\"";
-  j += ",\"free_heap\":" + String(ESP.getFreeHeap());
-  j += ",\"chip_id\":\"" + chip + "\"";
-  j += ",\"send_interval_s\":" + String(PAINEL_INTERVAL_MS / 1000UL);
+  j += sensorUltimaOk ? F("true") : F("false");
+  j += F(",\"uptime_s\":") + String(millis() / 1000UL);
+  j += F(",\"reset_reason\":\"") + jsonEscape(ESP.getResetReason()) + F("\"");
+  j += F(",\"free_heap\":") + String(ESP.getFreeHeap());
+  j += F(",\"chip_id\":\"") + chip + F("\"");
+  j += F(",\"send_interval_s\":") + String(intervaloEnvioMs() / 1000UL);
   j += F(",\"display_on\":");
-  j += displayLigado ? "true" : "false";
-  j += ",\"rssi_pct\":" + String(getRSSIasQuality(rssi));
+  j += displayLigado ? F("true") : F("false");
+  j += F(",\"rssi_pct\":") + String(getRSSIasQuality(rssi));
   j += F("}");
   return j;
 }
@@ -2667,12 +2828,12 @@ bool enviaParaApiInterno() {
   // O HTTPS (BearSSL, buffers de 1024/512) usa ~11-12 KB no total; o maior pedaço é a pilha
   // de ~6,2 KB. Por isso confere o total livre e o maior bloco contínuo (HTTPS_MIN_*).
   if (https && (ESP.getFreeHeap() < HTTPS_MIN_LIVRE || ESP.getMaxFreeBlockSize() < HTTPS_MIN_BLOCO)) {
-    apiUltimoMsg = "Memória insuficiente para HTTPS (" + String(ESP.getFreeHeap()) + " bytes livres, maior bloco " +
-                   String(ESP.getMaxFreeBlockSize()) + ")";
+    apiUltimoMsg = F("Memória insuficiente para HTTPS (") + String(ESP.getFreeHeap()) + F(" bytes livres, maior bloco ") +
+                   String(ESP.getMaxFreeBlockSize()) + F(")");
     return false;
   }
 
-  if (envioNaTela) desenhaEnvioEtapa(25, "Preparando dados");
+  if (envioNaTela) desenhaEnvioEtapa(25, F("Preparando dados"));
   String corpo = montaPayloadApi();
 
   WiFiClient clientPlain;
@@ -2694,20 +2855,20 @@ bool enviaParaApiInterno() {
     return false;
   }
 
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("x-device-key", deviceKey);          // DEVICE_KEY configurada em /config
+  http.addHeader(F("Content-Type"), F("application/json"));
+  http.addHeader(F("x-device-key"), deviceKey);          // DEVICE_KEY configurada em /config
 
-  if (envioNaTela) desenhaEnvioEtapa(60, https ? "Conectando (HTTPS)" : "Conectando");
+  if (envioNaTela) desenhaEnvioEtapa(60, https ? F("Conexão segura") : F("Conectando"));
   unsigned long t0 = millis();
   int codigo = http.POST(corpo);                      // > 0: código HTTP, < 0: erro de conexão
   apiUltimoDurMs = millis() - t0;
-  if (envioNaTela) desenhaEnvioEtapa(100, "Resposta recebida");
-  if (codigo > 0) apiUltimoMsg = "HTTP " + String(codigo);
+  if (envioNaTela) desenhaEnvioEtapa(100, F("Resposta recebida"));
+  if (codigo > 0) apiUltimoMsg = F("HTTP ") + String(codigo);
   else apiUltimoMsg = HTTPClient::errorToString(codigo);
   http.end();
 
   apiUltimoOk = (codigo >= 200 && codigo < 300);
-  Serial.println("API -> " + apiUltimoMsg);
+  Serial.println(F("API -> ") + apiUltimoMsg);
   return apiUltimoOk;
 }
 
@@ -2716,6 +2877,7 @@ bool enviaParaApiInterno() {
  * ou falha (3 piscadas).
  */
 bool enviaParaApi() {
+  ecoAcorda(30000UL);                   // HTTPS sem light sleep: conecta mais rápido e não perde pacotes
   ledEnviando = true;
   bool ok = enviaParaApiInterno();
   ledEnviando = false;
@@ -2731,10 +2893,10 @@ String htmlEsc(const String& s) {
   o.reserve(s.length() + 8);
   for (size_t k = 0; k < s.length(); k++) {
     char c = s[k];
-    if (c == '&') o += "&amp;";
-    else if (c == '<') o += "&lt;";
-    else if (c == '>') o += "&gt;";
-    else if (c == '"') o += "&quot;";
+    if (c == '&') o += F("&amp;");
+    else if (c == '<') o += F("&lt;");
+    else if (c == '>') o += F("&gt;");
+    else if (c == '"') o += F("&quot;");
     else o += c;
   }
   return o;
@@ -2798,7 +2960,7 @@ bool hostEhDesteEsp(const String& host) {
   if (host == WiFi.localIP().toString()) return true;
   String nome = String(WiFi.hostname());
   nome.toLowerCase();
-  return host == nome || host.startsWith(nome + ".");
+  return host == nome || host.startsWith(nome + F("."));
 }
 
 /**
@@ -2811,16 +2973,16 @@ bool requisicaoSegura() {
   String host = server.hostHeader();
   bool ok = hostEhDesteEsp(semPorta(host));
   if (ok) {
-    String origem = server.header("Origin");
-    String ref = server.header("Referer");
+    String origem = server.header(F("Origin"));
+    String ref = server.header(F("Referer"));
     if (origem.length() > 0) ok = origem.startsWith("http://") && hostDaUrl(origem).equalsIgnoreCase(host);   // 'null' também é recusado
     else if (ref.length() > 0) ok = ref.startsWith("http://") && hostDaUrl(ref).equalsIgnoreCase(host);
   }
   if (!ok) {
-    Serial.println("POST recusado (veio de outro site): " + server.uri());
+    Serial.println(F("POST recusado (veio de outro site): ") + server.uri());
     server.send(403, "text/html; charset=utf-8",
-                "<meta charset=\"utf-8\"><p>Pedido recusado: ele não veio da página desta estação. "
-                "Abra a página pelo endereço do ESP e tente de novo.</p>");
+                PSTR("<meta charset=\"utf-8\"><p>Pedido recusado: ele não veio da página desta estação. "
+                "Abra a página pelo endereço do ESP e tente de novo.</p>"));
   }
   return ok;
 }
@@ -2828,23 +2990,25 @@ bool requisicaoSegura() {
 /** Redireciona (303) para a seção certa da /config, com o código da mensagem de resultado. */
 void redirecionaConfig(const char* r) {
   // Cada código de resultado volta para a seção do formulário que o gerou
-  static const char* const DISPLAY_COD[] = {"disp", "tempo", "tempo_erro", "tempoligada", "tempoligada_erro", "brilho",
-                                            "brilho_erro", "telas", "telas_erro", "agenda", "hora", "horaigual"};
-  static const char* const PAINEL_COD[] = {"api", "apiurl", "apiid", "apikey", "envio_ok", "envio_erro"};
-  const char* secao = "clima";          // ok, chave, local, local_vazio, coord, idioma
-  for (const char* c : DISPLAY_COD) if (!strcmp(r, c)) secao = "display";
-  for (const char* c : PAINEL_COD) if (!strcmp(r, c)) secao = "painel";
-  if (!strcmp(r, "fuso") || !strcmp(r, "fuso_ok")) secao = "hora";
-  else if (!strcmp(r, "bat")) secao = "bateria";
-  else if (!strcmp(r, "led")) secao = "led";
-  server.sendHeader("Location", String("/config?s=") + secao + "&r=" + r);
+  static const char DISPLAY_COD[] PROGMEM = "|disp|tempo|tempo_erro|tempoligada|tempoligada_erro|brilho|brilho_erro|telas|telas_erro|agenda|hora|horaigual|";
+  static const char PAINEL_COD[] PROGMEM = "|api|apiurl|apiid|apikey|envio_ok|envio_erro|";
+  static const char HORA_COD[] PROGMEM = "|fuso|fuso_ok|";
+  static const char BATERIA_COD[] PROGMEM = "|bat|eco|";
+  String chave = String('|') + r + '|';
+  const __FlashStringHelper* secao = F("clima");   // ok, chave, local, local_vazio, coord, idioma
+  if (String(FPSTR(DISPLAY_COD)).indexOf(chave) >= 0) secao = F("display");
+  else if (String(FPSTR(PAINEL_COD)).indexOf(chave) >= 0) secao = F("painel");
+  else if (String(FPSTR(HORA_COD)).indexOf(chave) >= 0) secao = F("hora");
+  else if (String(FPSTR(BATERIA_COD)).indexOf(chave) >= 0) secao = F("bateria");
+  else if (!strcmp_P(r, PSTR("led"))) secao = F("led");
+  server.sendHeader(F("Location"), String(F("/config?s=")) + secao + F("&r=") + r);
   server.send(303, "text/plain", "");
 }
 
 /** Formata uma quantidade de bytes como KB ou MB. */
 String fmtBytes(uint32_t b) {
-  if (b >= 1048576UL) return String(b / 1048576.0, 1) + " MB";
-  return String(b / 1024UL) + " KB";
+  if (b >= 1048576UL) return String(b / 1048576.0, 1) + F(" MB");
+  return String(b / 1024UL) + F(" KB");
 }
 
 /** Formata segundos como 'Xd Xh Xmin Xs'. */
@@ -2854,14 +3018,14 @@ String formataUptime(unsigned long s) {
   unsigned long m = (s % 3600UL) / 60UL;
   unsigned long seg = s % 60UL;
   String o = "";
-  if (d) o += String(d) + "d ";
-  o += String(h) + "h " + String(m) + "min " + String(seg) + "s";
+  if (d) o += String(d) + F("d ");
+  o += String(h) + F("h ") + String(m) + F("min ") + String(seg) + F("s");
   return o;
 }
 
 /** Monta uma linha de informação da /config (rótulo à esquerda, valor à direita, como nos Ajustes do iPhone). */
 String linhaInfoP(const __FlashStringHelper* rotulo, const String& valor) {
-  return "<div class=\"it\"><span class=\"tx\">" + String(rotulo) + "</span><span class=\"val\">" + valor + "</span></div>";
+  return F("<div class=\"it\"><span class=\"tx\">") + String(rotulo) + F("</span><span class=\"val\">") + valor + F("</span></div>");
 }
 
 // ---- SERVIDOR WEB: LOGIN DA /config -------------------------------------------------------
@@ -2917,7 +3081,7 @@ void geraSalSessao() {
 bool logado() {
   if (!loginAtivo()) return true;
   if (!sessaoSalOk) return false;       // ninguém fez login ainda
-  String c = server.header("Cookie");
+  String c = server.header(F("Cookie"));
   int i = c.indexOf("ws_sessao=");
   if (i < 0) return false;
   String v = c.substring(i + 10);
@@ -2930,8 +3094,8 @@ bool logado() {
 /** Chamada no início das páginas e ações protegidas: sem login, manda para /login e devolve false. */
 bool exigeLogin() {
   if (logado()) return true;
-  server.sendHeader("Location", "/login");
-  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader(F("Location"), F("/login"));
+  server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(303, "text/plain", "");
   return false;
 }
@@ -2939,16 +3103,16 @@ bool exigeLogin() {
 /** GET /login: página com o campo de senha (se já estiver logado, vai direto para a /config). */
 void paginaLogin() {
   if (logado()) {
-    server.sendHeader("Location", "/config");
+    server.sendHeader(F("Location"), F("/config"));
     server.send(303, "text/plain", "");
     return;
   }
-  String r = server.arg("r");
+  String r = server.arg(F("r"));
   String msg = "";
-  if (r == "erro") msg = "⚠️ Senha incorreta.";
-  else if (r == "bloq") msg = "⚠️ Muitas tentativas erradas. Aguarde 1 minuto e tente de novo.";
-  else if (r == "sair") msg = "✅ Você saiu da configuração neste navegador.";
-  else if (r == "todos") msg = "✅ Todos os navegadores foram desconectados.";
+  if (r.equals(F("erro"))) msg = F("⚠️ Senha incorreta.");
+  else if (r.equals(F("bloq"))) msg = F("⚠️ Muitas tentativas erradas. Aguarde 1 minuto e tente de novo.");
+  else if (r.equals(F("sair"))) msg = F("✅ Você saiu da configuração neste navegador.");
+  else if (r.equals(F("todos"))) msg = F("✅ Todos os navegadores foram desconectados.");
 
   String h;
   h.reserve(1800);
@@ -2963,16 +3127,16 @@ void paginaLogin() {
       "button{padding:.7em 1.2em;margin:1em 0;border:0;border-radius:10px;font-size:1rem;background:#81d4fa;color:#0f2027;font-weight:600}"
       ".mut{color:#a9c1cf;font-size:.85rem}a{color:#81d4fa}</style></head><body>"
       "<p><a href=\"/\">&larr; Voltar</a></p><h2>Configurações</h2>");
-  if (msg.length()) h += "<p>" + msg + "</p>";
-  h += "<form method=\"POST\" action=\"/login\">"
+  if (msg.length()) h += F("<p>") + msg + F("</p>");
+  h += F("<form method=\"POST\" action=\"/login\">"
        "<input type=\"text\" name=\"u\" value=\"admin\" autocomplete=\"username\" style=\"display:none\">"   // ajuda o gerenciador de senhas
        "<label>Senha</label>"
        "<input name=\"senha\" type=\"password\" autocomplete=\"current-password\" autofocus required>"
        "<button type=\"submit\">Entrar</button></form>"
-       "<p class=\"mut\">Este navegador fica conectado por " + String(LOGIN_DIAS) + " dias. "
+       "<p class=\"mut\">Este navegador fica conectado por ") + String(LOGIN_DIAS) + F(" dias. "
        "Esqueceu a senha? Ela é a CONFIG_SENHA do WeatherStationConfig.h usado para gravar o firmware.</p>"
-       "</body></html>";
-  server.sendHeader("Cache-Control", "no-store");
+       "</body></html>");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(200, "text/html; charset=utf-8", h);
 }
 
@@ -2981,31 +3145,31 @@ void handleLogin() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   unsigned long ms = millis();
   if (loginFalhas >= 5 && (long)(ms - loginLiberaEm) < 0) {
-    server.sendHeader("Location", "/login?r=bloq");
+    server.sendHeader(F("Location"), F("/login?r=bloq"));
     server.send(303, "text/plain", "");
     return;
   }
-  if (!loginAtivo() || !comparaSeguro(server.arg("senha"), String(CONFIG_SENHA))) {
+  if (!loginAtivo() || !comparaSeguro(server.arg(F("senha")), String(CONFIG_SENHA))) {
     if (loginFalhas < 255) loginFalhas++;
     if (loginFalhas >= 5) loginLiberaEm = ms + 60000UL;
     Serial.println(F("Login da /config: senha incorreta"));
-    server.sendHeader("Location", "/login?r=erro");
+    server.sendHeader(F("Location"), F("/login?r=erro"));
     server.send(303, "text/plain", "");
     return;
   }
   loginFalhas = 0;
   if (!sessaoSalOk) geraSalSessao();    // 1º login: sorteia o sal (com o WiFi ligado)
-  server.sendHeader("Set-Cookie", "ws_sessao=" + tokenSessao() + "; Max-Age=" + String((unsigned long)LOGIN_DIAS * 86400UL) +
-                                  "; Path=/; HttpOnly; SameSite=Lax");
-  server.sendHeader("Location", "/config");
+  server.sendHeader(F("Set-Cookie"), F("ws_sessao=") + tokenSessao() + F("; Max-Age=") + String((unsigned long)LOGIN_DIAS * 86400UL) +
+                                  F("; Path=/; HttpOnly; SameSite=Lax"));
+  server.sendHeader(F("Location"), F("/config"));
   server.send(303, "text/plain", "");
 }
 
 /** POST /sair: sai da configuração só neste navegador (apaga o cookie). */
 void handleSair() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
-  server.sendHeader("Set-Cookie", "ws_sessao=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax");
-  server.sendHeader("Location", "/login?r=sair");
+  server.sendHeader(F("Set-Cookie"), F("ws_sessao=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"));
+  server.sendHeader(F("Location"), F("/login?r=sair"));
   server.send(303, "text/plain", "");
 }
 
@@ -3014,8 +3178,8 @@ void handleSairTodos() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;            // precisa estar logado (senha da /config)
   geraSalSessao();
-  server.sendHeader("Set-Cookie", "ws_sessao=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax");
-  server.sendHeader("Location", "/login?r=todos");
+  server.sendHeader(F("Set-Cookie"), F("ws_sessao=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"));
+  server.sendHeader(F("Location"), F("/login?r=todos"));
   server.send(303, "text/plain", "");
 }
 
@@ -3032,60 +3196,60 @@ void paginaJson() {
   String j;
   j.reserve(800);
   j += F("{\"unid\":\"");
-  j += IS_METRIC ? "°C" : "°F";
+  j += IS_METRIC ? F("°C") : F("°F");
   j += F("\",\"erro\":");
-  j += weatherOk ? "false" : "true";
+  j += weatherOk ? F("false") : F("true");
   j += F(",\"display\":");
-  j += displayLigado ? "true" : "false";
-  j += ",\"brilho\":" + String(brilhoAgora());           // % de brilho que vale agora (dia ou noturno)
+  j += displayLigado ? F("true") : F("false");
+  j += F(",\"brilho\":") + String(brilhoAgora());           // % de brilho que vale agora (dia ou noturno)
   j += F(",\"brilhoNoite\":");
-  j += noiteAgora() ? "true" : "false";
+  j += noiteAgora() ? F("true") : F("false");
   j += F(",\"bateria\":");
-  if (bateriaAtiva) j += "{\"v\":" + String(bateriaV, 2) + ",\"pct\":" + String(bateriaPct) + "}";
+  if (bateriaAtiva) j += F("{\"v\":") + String(bateriaV, 2) + F(",\"pct\":") + String(bateriaPct) + F("}");
   else j += F("null");
   j += F(",\"energia\":");                 // true = energia externa (5 V) conectada; false = bateria; null = sem sensor
-  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? "true" : "false";
+  if (energiaAtiva && PIN_ENERGIA >= 0) j += energiaExterna ? F("true") : F("false");
   else j += F("null");
   j += F(",\"interno\":{");
   if (sensorOk) {
-    j += "\"temp\":" + String(localTemp, 1) + ",\"umid\":" + String(localHum, 1);
+    j += F("\"temp\":") + String(localTemp, 1) + F(",\"umid\":") + String(localHum, 1);
   } else {
     j += F("\"temp\":null,\"umid\":null");
   }
   j += F("},\"externo\":{");
-  j += "\"cidade\":\"" + jsonEscape(currentWeather.cityName) + "\",";
-  j += "\"desc\":\"" + jsonEscape(currentWeather.description) + "\",";
-  j += "\"icone\":\"" + jsonEscape(currentWeather.icon) + "\",";
-  j += "\"temp\":" + String(currentWeather.temp, 1) + ",";
-  j += "\"min\":" + String(currentWeather.tempMin, 1) + ",";
-  j += "\"max\":" + String(currentWeather.tempMax, 1) + ",";
-  j += "\"umid\":" + String(currentWeather.humidity) + ",";
-  j += "\"pressao\":" + String(currentWeather.pressure) + ",";
-  j += "\"vento\":" + String(windKmh, 0) + ",";
-  j += "\"ventoDir\":" + String(currentWeather.windDeg, 0) + ",";
-  j += "\"visib\":" + String(currentWeather.visibility / 1000.0, 1) + ",";
-  j += "\"nuvens\":" + String(currentWeather.clouds) + ",";
-  j += "\"nascer\":" + String((unsigned long)currentWeather.sunrise) + ",";
-  j += "\"por\":" + String((unsigned long)currentWeather.sunset);
+  j += F("\"cidade\":\"") + jsonEscape(currentWeather.cityName) + F("\",");
+  j += F("\"desc\":\"") + jsonEscape(currentWeather.description) + F("\",");
+  j += F("\"icone\":\"") + jsonEscape(currentWeather.icon) + F("\",");
+  j += F("\"temp\":") + String(currentWeather.temp, 1) + F(",");
+  j += F("\"min\":") + String(currentWeather.tempMin, 1) + F(",");
+  j += F("\"max\":") + String(currentWeather.tempMax, 1) + F(",");
+  j += F("\"umid\":") + String(currentWeather.humidity) + F(",");
+  j += F("\"pressao\":") + String(currentWeather.pressure) + F(",");
+  j += F("\"vento\":") + String(windKmh, 0) + F(",");
+  j += F("\"ventoDir\":") + String(currentWeather.windDeg, 0) + F(",");
+  j += F("\"visib\":") + String(currentWeather.visibility / 1000.0, 1) + F(",");
+  j += F("\"nuvens\":") + String(currentWeather.clouds) + F(",");
+  j += F("\"nascer\":") + String((unsigned long)currentWeather.sunrise) + F(",");
+  j += F("\"por\":") + String((unsigned long)currentWeather.sunset);
   j += F("},\"previsao\":[");
   for (uint8_t k = 0; k < MAX_FORECASTS; k++) {
     if (k) j += F(",");
-    j += "{\"dia\":" + String((unsigned long)forecasts[k].observationTime) + ",";
-    j += "\"icone\":\"" + jsonEscape(forecasts[k].icon) + "\",";
-    j += "\"temp\":" + String(forecasts[k].temp, 1) + "}";
+    j += F("{\"dia\":") + String((unsigned long)forecasts[k].observationTime) + F(",");
+    j += F("\"icone\":\"") + jsonEscape(forecasts[k].icon) + F("\",");
+    j += F("\"temp\":") + String(forecasts[k].temp, 1) + F("}");
   }
   j += F("],\"prox24\":");                  // próximas 24 h (null até a 1ª previsão)
   if (prox24Ok) {
-    j += "{\"min\":" + String(prox24Min, 1) + ",\"max\":" + String(prox24Max, 1) +
-         ",\"chuva\":" + String(prox24Chuva, 1) + ",\"sens\":" + String(prox24Sens, 1) + "}";
+    j += F("{\"min\":") + String(prox24Min, 1) + F(",\"max\":") + String(prox24Max, 1) +
+         F(",\"chuva\":") + String(prox24Chuva, 1) + F(",\"sens\":") + String(prox24Sens, 1) + F("}");
   } else j += F("null");
   j += F(",\"lua\":");                      // fase da Lua (null até a hora sincronizar); nascer/pôr = 0 sem coordenadas
   if (luaOk) {
-    j += "{\"fase\":" + String(luaFase) + ",\"nome\":\"" + String(nomeFaseLua(luaFase)) + "\",\"ilum\":" +
-         String((int)(luaIlum * 100 + 0.5f)) + ",\"nasce\":" + String(astroOk ? (unsigned long)luaNasce : 0UL) +
-         ",\"poe\":" + String(astroOk ? (unsigned long)luaPoe : 0UL) + "}";
+    j += F("{\"fase\":") + String(luaFase) + F(",\"nome\":\"") + String(nomeFaseLua(luaFase)) + F("\",\"ilum\":") +
+         String((int)(luaIlum * 100 + 0.5f)) + F(",\"nasce\":") + String(astroOk ? (unsigned long)luaNasce : 0UL) +
+         F(",\"poe\":") + String(astroOk ? (unsigned long)luaPoe : 0UL) + F("}");
   } else j += F("null");
-  j += ",\"rssi\":" + String(WiFi.RSSI()) + ",\"rssiPct\":" + String(getRSSIasQuality(WiFi.RSSI())) + "}";
+  j += F(",\"rssi\":") + String(WiFi.RSSI()) + F(",\"rssiPct\":") + String(getRSSIasQuality(WiFi.RSSI())) + F("}");
   server.send(200, "application/json", j);
 }
 
@@ -3096,10 +3260,10 @@ void paginaHistorico() {
   long prox = (long)(nextHist - millis()) / 1000;
   if (prox < 0) prox = 0;
   j += F("{\"ok\":");
-  j += sensorOk ? "true" : "false";
-  j += ",\"sensor\":\"" SENSOR_NOME "\",\"pino\":\"" + nomePino(DHTPIN) + "\"";   // usados na mensagem de erro da página
-  j += ",\"proxima\":" + String(prox);
-  j += ",\"intervalo\":" + String(HIST_INTERVAL_MS / 1000UL) + ",\"temp\":[";
+  j += sensorOk ? F("true") : F("false");
+  j += F(",\"sensor\":\"" SENSOR_NOME "\",\"pino\":\"") + nomePino(DHTPIN) + F("\"");   // usados na mensagem de erro da página
+  j += F(",\"proxima\":") + String(prox);
+  j += F(",\"intervalo\":") + String(HIST_INTERVAL_MS / 1000UL) + F(",\"temp\":[");
   uint8_t start = (histCount < HIST_SIZE) ? 0 : histHead;
   for (uint8_t k = 0; k < histCount; k++) {
     if (k) j += F(",");
@@ -3124,13 +3288,13 @@ String iconeSinal(int pct) {
   else if (pct >= 25) n = 2;
   else if (pct > 0) n = 1;
 
-  String s = "<svg width=\"34\" height=\"22\" viewBox=\"0 0 34 22\" style=\"vertical-align:middle\">";
+  String s = F("<svg width=\"34\" height=\"22\" viewBox=\"0 0 34 22\" style=\"vertical-align:middle\">");
   for (int k = 0; k < 4; k++) {
     int h = 6 + k * 5;                  // alturas 6, 11, 16, 21
-    s += "<rect x=\"" + String(k * 9) + "\" y=\"" + String(22 - h) + "\" width=\"7\" height=\"" + String(h) +
-         "\" rx=\"1.5\" fill=\"" + (k < n ? "#81d4fa" : "#ffffff40") + "\"/>";
+    s += F("<rect x=\"") + String(k * 9) + F("\" y=\"") + String(22 - h) + F("\" width=\"7\" height=\"") + String(h) +
+         F("\" rx=\"1.5\" fill=\"") + (k < n ? F("#81d4fa") : F("#ffffff40")) + F("\"/>");
   }
-  s += "</svg>";
+  s += F("</svg>");
   return s;
 }
 
@@ -3138,23 +3302,23 @@ String iconeSinal(int pct) {
 String iconeBateria(int pct) {
   const char* cor = pct <= BAT_CRITICA_PCT ? "#ef5350" : (pct <= BAT_AVISO_PCT ? "#ffb74d" : "#66bb6a");
   int w = (22 * pct) / 100;
-  String s = "<svg width=\"34\" height=\"16\" viewBox=\"0 0 34 16\" style=\"vertical-align:middle\">"
+  String s = F("<svg width=\"34\" height=\"16\" viewBox=\"0 0 34 16\" style=\"vertical-align:middle\">"
              "<rect x=\"1\" y=\"1\" width=\"28\" height=\"14\" rx=\"3.5\" fill=\"none\" stroke=\"#ffffffcc\" stroke-width=\"2\"/>"
-             "<rect x=\"4\" y=\"4\" width=\"" + String(w) + "\" height=\"8\" rx=\"1.5\" fill=\"" + cor + "\"/>"
-             "<rect x=\"30\" y=\"5\" width=\"3\" height=\"6\" rx=\"1.2\" fill=\"#ffffffcc\"/></svg>";
+             "<rect x=\"4\" y=\"4\" width=\"") + String(w) + F("\" height=\"8\" rx=\"1.5\" fill=\"") + cor + F("\"/>"
+             "<rect x=\"30\" y=\"5\" width=\"3\" height=\"6\" rx=\"1.2\" fill=\"#ffffffcc\"/></svg>");
   return s;
 }
 
 /** Cartão da seção Bateria e energia: carga, tensão, estado e situação. */
 String tabelaBateria() {
   String t = F("<div class=\"grp\">");
-  if (energiaAtiva && PIN_ENERGIA >= 0) t += linhaInfo("Alimentação", energiaExterna ? "🔌 Energia externa (5 V conectada)" : "🔋 Bateria (sem energia externa)");
+  if (energiaAtiva && PIN_ENERGIA >= 0) t += linhaInfo("Alimentação", energiaExterna ? F("🔌 Energia externa (5 V conectada)") : F("🔋 Bateria (sem energia externa)"));
   if (!bateriaAtiva) {
-    t += linhaInfo("Estado", "Desativada (ative acima)");
+    t += linhaInfo("Estado", F("Desativada (ative acima)"));
   } else {
     const char* estado = bateriaPct <= BAT_CRITICA_PCT ? "⚠️ Crítica" : (bateriaPct <= BAT_AVISO_PCT ? "⚠️ Baixa" : "✅ Normal");
-    t += linhaInfo("Carga", iconeBateria(bateriaPct) + " " + String(bateriaPct) + "%");
-    t += linhaInfo("Tensão", String(bateriaV, 2) + " V");
+    t += linhaInfo("Carga", iconeBateria(bateriaPct) + F(" ") + String(bateriaPct) + F("%"));
+    t += linhaInfo("Tensão", String(bateriaV, 2) + F(" V"));
     t += linhaInfo("Estado", estado);
     t += linhaInfo("Situação", bateriaSituacao(bateriaV));
   }
@@ -3169,7 +3333,7 @@ String tabelaWiFi() {
   t = F("<div class=\"grp\">");
 
   bool conectado = (WiFi.status() == WL_CONNECTED);
-  t += linhaInfo("Estado", conectado ? "✅ Conectado" : "⚠️ Desconectado");
+  t += linhaInfo("Estado", conectado ? F("✅ Conectado") : F("⚠️ Desconectado"));
 
   if (conectado) {
     int rssi = WiFi.RSSI();
@@ -3185,7 +3349,7 @@ String tabelaWiFi() {
     }
 
     t += linhaInfo("Rede (SSID)", htmlEsc(WiFi.SSID()));
-    t += linhaInfo("Sinal", iconeSinal(pct) + " " + String(rssi) + " dBm · " + String(pct) + "% · " + nivel);
+    t += linhaInfo("Sinal", iconeSinal(pct) + F(" ") + String(rssi) + F(" dBm · ") + String(pct) + F("% · ") + nivel);
     t += linhaInfo("BSSID (roteador)", WiFi.BSSIDstr());
     t += linhaInfo("Canal", String(WiFi.channel()));
     t += linhaInfo("Padrão WiFi", phy);
@@ -3199,7 +3363,7 @@ String tabelaWiFi() {
   t += linhaInfo("Hostname", htmlEsc(hn));
   t += linhaInfo("MAC (estação)", WiFi.macAddress());
   t += linhaInfo("MAC (AP)", WiFi.softAPmacAddress());
-  t += linhaInfo("Reconexão automática", WiFi.getAutoReconnect() ? "Sim" : "Não");
+  t += linhaInfo("Reconexão automática", WiFi.getAutoReconnect() ? F("Sim") : F("Não"));
 
   const char* sono = "?";
   switch (WiFi.getSleepMode()) {
@@ -3230,10 +3394,10 @@ String tabelaSistema() {
     snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900, ti->tm_hour, ti->tm_min, ti->tm_sec);
     t += linhaInfo("Data e hora (NTP)", buf);
   } else {
-    t += linhaInfo("Data e hora (NTP)", "Sem sincronização");
+    t += linhaInfo("Data e hora (NTP)", F("Sem sincronização"));
   }
   t += linhaInfo("Servidores NTP", NTP_SERVIDOR_1 "<br>" NTP_SERVIDOR_2 "<br>" NTP_SERVIDOR_3);
-  t += linhaInfo("Coordenadas da cidade", coordOk ? String(cidadeLat, 4) + ", " + String(cidadeLon, 4) : String("ainda não recebidas"));
+  t += linhaInfo("Coordenadas da cidade", coordOk ? String(cidadeLat, 4) + F(", ") + String(cidadeLon, 4) : String(F("ainda não recebidas")));
 
   String chip = String(ESP.getChipId(), HEX);
   chip.toUpperCase();
@@ -3241,20 +3405,20 @@ String tabelaSistema() {
   flashId.toUpperCase();
 
   t += linhaInfo("Chip ID", chip);
-  t += linhaInfo("CPU", String(ESP.getCpuFreqMHz()) + " MHz");
+  t += linhaInfo("CPU", String(ESP.getCpuFreqMHz()) + F(" MHz"));
   t += linhaInfo("Flash (chip real)", fmtBytes(ESP.getFlashChipRealSize()));
   t += linhaInfo("Flash (config. da IDE)", fmtBytes(ESP.getFlashChipSize()));
-  t += linhaInfo("Velocidade da flash", String(ESP.getFlashChipSpeed() / 1000000UL) + " MHz");
+  t += linhaInfo("Velocidade da flash", String(ESP.getFlashChipSpeed() / 1000000UL) + F(" MHz"));
   t += linhaInfo("ID da flash", flashId);
-  t += linhaInfo("Programa", fmtBytes(ESP.getSketchSize()) + " usados · " + fmtBytes(ESP.getFreeSketchSpace()) + " livres");
-  t += linhaInfo("Memória livre (heap)", String(ESP.getFreeHeap()) + " bytes");
-  t += linhaInfo("Maior bloco livre", String(ESP.getMaxFreeBlockSize()) + " bytes");
-  t += linhaInfo("Fragmentação do heap", String(ESP.getHeapFragmentation()) + "%");
+  t += linhaInfo("Programa", fmtBytes(ESP.getSketchSize()) + F(" usados · ") + fmtBytes(ESP.getFreeSketchSpace()) + F(" livres"));
+  t += linhaInfo("Memória livre (heap)", String(ESP.getFreeHeap()) + F(" bytes"));
+  t += linhaInfo("Maior bloco livre", String(ESP.getMaxFreeBlockSize()) + F(" bytes"));
+  t += linhaInfo("Fragmentação do heap", String(ESP.getHeapFragmentation()) + F("%"));
   t += linhaInfo("Firmware", FIRMWARE_VERSAO);
-  t += linhaInfo("Sensor " SENSOR_NOME, sensorUltimaOk ? String("OK") : "sem leitura válida (confira o dado no pino " + nomePino(DHTPIN) + ")");
+  t += linhaInfo("Sensor " SENSOR_NOME, sensorUltimaOk ? String(F("OK")) : F("sem leitura válida (confira o dado no pino ") + nomePino(DHTPIN) + F(")"));
   t += linhaInfo("Core ESP8266", htmlEsc(ESP.getCoreVersion()));
   t += linhaInfo("SDK", htmlEsc(String(ESP.getSdkVersion())));
-  t += linhaInfo("Compilado em", String(__DATE__) + " " + String(__TIME__));
+  t += linhaInfo("Compilado em", String(__DATE__) + F(" ") + String(__TIME__));
 
   t += F("</div>");
   return t;
@@ -3264,102 +3428,103 @@ String tabelaSistema() {
 
 /** Tempo curto para os resumos ('menos de 1 min', '12 min', '3 h 5 min', '2 d 4 h'). */
 String tempoCurto(unsigned long s) {
-  if (s < 60UL) return "menos de 1 min";
-  if (s < 3600UL) return String(s / 60UL) + " min";
-  if (s < 86400UL) return String(s / 3600UL) + " h " + String((s % 3600UL) / 60UL) + " min";
-  return String(s / 86400UL) + " d " + String((s % 86400UL) / 3600UL) + " h";
+  if (s < 60UL) return F("menos de 1 min");
+  if (s < 3600UL) return String(s / 60UL) + F(" min");
+  if (s < 86400UL) return String(s / 3600UL) + F(" h ") + String((s % 3600UL) / 60UL) + F(" min");
+  return String(s / 86400UL) + F(" d ") + String((s % 86400UL) / 3600UL) + F(" h");
 }
 
 /** Texto da mensagem de resultado (código 'r' que volta depois de salvar). erro = true para avisos. */
 String msgConfig(const String& r, bool& erro) {
   String m = F("");
-  if (r == "ok") m = F("✅ Configurações salvas. Atualizando o clima...");
-  else if (r == "chave") m = F("⚠️ Chave inválida: use só letras e números (20 a 40 caracteres).");
-  else if (r == "local") m = F("⚠️ ID da cidade inválido: informe o número (ou cole o endereço da cidade).");
-  else if (r == "local_vazio") m = F("⚠️ Informe a cidade: busque pelo nome, preencha a latitude e a longitude, ou informe o ID.");
-  else if (r == "coord") m = F("⚠️ Coordenadas inválidas: preencha as duas (latitude de -90 a 90 e longitude de -180 a 180).");
-  else if (r == "idioma") m = F("⚠️ Idioma inválido.");
-  else if (r == "disp") m = F("✅ Tela atualizada.");
-  else if (r == "tempo") m = F("✅ Tempo de cada tela salvo.");
-  else if (r == "tempo_erro") m = F("⚠️ Tempo inválido: escolha de 5 a 30 segundos.");
-  else if (r == "tempoligada") m = F("✅ Tempo de tela ligada salvo.");
-  else if (r == "tempoligada_erro") m = F("⚠️ Tempo de tela ligada inválido.");
-  else if (r == "led") m = F("✅ LED de status salvo.");
-  else if (r == "brilho") m = F("✅ Brilho salvo.");
-  else if (r == "brilho_erro") m = F("⚠️ Brilho inválido: escolha de 5% a 100%.");
-  else if (r == "telas") m = F("✅ Telas do display salvas.");
-  else if (r == "telas_erro") m = F("⚠️ Marque pelo menos uma tela.");
-  else if (r == "agenda") m = F("✅ Horário automático salvo.");
-  else if (r == "hora") m = F("⚠️ Horário inválido.");
-  else if (r == "horaigual") m = F("⚠️ Os horários de ligar e de apagar não podem ser iguais.");
-  else if (r == "fuso") m = F("⚠️ Fuso horário inválido.");
-  else if (r == "fuso_ok") m = F("✅ Fuso horário salvo.");
-  else if (r == "bat") m = F("✅ Bateria e energia salvas.");
-  else if (r == "api") m = F("✅ Dados do painel salvos.");
-  else if (r == "apiurl") m = F("⚠️ URL inválida: use http:// ou https:// e não deixe espaços.");
-  else if (r == "apiid") m = F("⚠️ ID do dispositivo inválido: use até 32 caracteres (letras, números, - _ .).");
-  else if (r == "apikey") m = F("⚠️ DEVICE_KEY inválida: use de 8 a 64 caracteres, sem espaços.");
-  else if (r == "envio_ok") m = F("✅ Dados enviados ao painel.");
-  else if (r == "envio_erro") m = String(F("⚠️ Falha no envio: ")) + htmlEsc(apiUltimoMsg);
+  if (r.equals(F("ok"))) m = F("✅ Configurações salvas. Atualizando o clima...");
+  else if (r.equals(F("chave"))) m = F("⚠️ Chave inválida: use só letras e números (20 a 40 caracteres).");
+  else if (r.equals(F("local"))) m = F("⚠️ ID da cidade inválido: informe o número (ou cole o endereço da cidade).");
+  else if (r.equals(F("local_vazio"))) m = F("⚠️ Informe a cidade: busque pelo nome, preencha a latitude e a longitude, ou informe o ID.");
+  else if (r.equals(F("coord"))) m = F("⚠️ Coordenadas inválidas: preencha as duas (latitude de -90 a 90 e longitude de -180 a 180).");
+  else if (r.equals(F("idioma"))) m = F("⚠️ Idioma inválido.");
+  else if (r.equals(F("disp"))) m = F("✅ Tela atualizada.");
+  else if (r.equals(F("tempo"))) m = F("✅ Tempo de cada tela salvo.");
+  else if (r.equals(F("tempo_erro"))) m = F("⚠️ Tempo inválido: escolha de 5 a 30 segundos.");
+  else if (r.equals(F("tempoligada"))) m = F("✅ Tempo de tela ligada salvo.");
+  else if (r.equals(F("tempoligada_erro"))) m = F("⚠️ Tempo de tela ligada inválido.");
+  else if (r.equals(F("led"))) m = F("✅ LED de status salvo.");
+  else if (r.equals(F("brilho"))) m = F("✅ Brilho salvo.");
+  else if (r.equals(F("brilho_erro"))) m = F("⚠️ Brilho inválido: escolha de 5% a 100%.");
+  else if (r.equals(F("telas"))) m = F("✅ Telas do display salvas.");
+  else if (r.equals(F("telas_erro"))) m = F("⚠️ Marque pelo menos uma tela.");
+  else if (r.equals(F("agenda"))) m = F("✅ Horário automático salvo.");
+  else if (r.equals(F("hora"))) m = F("⚠️ Horário inválido.");
+  else if (r.equals(F("horaigual"))) m = F("⚠️ Os horários de ligar e de apagar não podem ser iguais.");
+  else if (r.equals(F("fuso"))) m = F("⚠️ Fuso horário inválido.");
+  else if (r.equals(F("fuso_ok"))) m = F("✅ Fuso horário salvo.");
+  else if (r.equals(F("bat"))) m = F("✅ Bateria e energia salvas.");
+  else if (r.equals(F("eco"))) m = F("✅ Economia na bateria salva.");
+  else if (r.equals(F("api"))) m = F("✅ Dados do painel salvos.");
+  else if (r.equals(F("apiurl"))) m = F("⚠️ URL inválida: use http:// ou https:// e não deixe espaços.");
+  else if (r.equals(F("apiid"))) m = F("⚠️ ID do dispositivo inválido: use até 32 caracteres (letras, números, - _ .).");
+  else if (r.equals(F("apikey"))) m = F("⚠️ DEVICE_KEY inválida: use de 8 a 64 caracteres, sem espaços.");
+  else if (r.equals(F("envio_ok"))) m = F("✅ Dados enviados ao painel.");
+  else if (r.equals(F("envio_erro"))) m = String(F("⚠️ Falha no envio: ")) + htmlEsc(apiUltimoMsg);
   erro = m.startsWith("⚠️");
   return m;
 }
 
 /** Resumo do estado de uma seção, mostrado embaixo do nome no menu. */
 String secaoResumo(uint8_t k) {
-  String id = SECOES[k].id;
-  if (id == "clima") {
-    if (OPEN_WEATHER_MAP_APP_ID.length() == 0) return "⚠️ falta a chave da API";
-    if (weatherOk) return htmlEsc(currentWeather.cityName) + " · chave salva";
-    return "⚠️ sem dados do clima";
+  String id = FPSTR(SECOES[k].id);
+  if (id.equals(F("clima"))) {
+    if (OPEN_WEATHER_MAP_APP_ID.length() == 0) return F("⚠️ falta a chave da API");
+    if (weatherOk) return htmlEsc(currentWeather.cityName) + F(" · chave salva");
+    return F("⚠️ sem dados do clima");
   }
-  if (id == "display") {
-    return String(displayLigado ? "Ligado" : "Apagado") + " · brilho " + String(brilhoAgora()) + "% · " +
-           String(numTelasAtivas) + (numTelasAtivas == 1 ? " tela" : " telas");
+  if (id.equals(F("display"))) {
+    return String(displayLigado ? F("Ligado") : F("Apagado")) + F(" · brilho ") + String(brilhoAgora()) + F("% · ") +
+           String(numTelasAtivas) + (numTelasAtivas == 1 ? F(" tela") : F(" telas"));
   }
-  if (id == "hora") {
-    String fuso = "UTC";
-    for (uint8_t f = 0; f < FUSO_COUNT; f++) if (FUSOS[f].min == fusoMin) fuso = String(FUSOS[f].nome).substring(0, 9);
-    if (horarioVerao) fuso += " +verão";
-    return fuso + (horaOk() ? " · sincronizada" : " · sem sincronizar");
+  if (id.equals(F("hora"))) {
+    String fuso = F("UTC");
+    for (uint8_t f = 0; f < FUSO_COUNT; f++) if (FUSOS[f].min == fusoMin) fuso = String(FPSTR(FUSOS[f].nome)).substring(0, 9);
+    if (horarioVerao) fuso += F(" +verão");
+    return fuso + (horaOk() ? F(" · sincronizada") : F(" · sem sincronizar"));
   }
-  if (id == "bateria") {
-    String s = bateriaAtiva ? String(bateriaPct) + "% · " + String(bateriaV, 2) + " V" : String("bateria desativada");
-    if (energiaAtiva && PIN_ENERGIA >= 0) s += energiaExterna ? " · na tomada" : " · na bateria";
+  if (id.equals(F("bateria"))) {
+    String s = bateriaAtiva ? String(bateriaPct) + F("% · ") + String(bateriaV, 2) + F(" V") : String(F("bateria desativada"));
+    if (energiaAtiva && PIN_ENERGIA >= 0) s += energiaExterna ? F(" · na tomada") : F(" · na bateria");
     return s;
   }
-  if (id == "painel") {
-    if (apiUrl.length() == 0) return "envio desligado";
-    if (!apiTentou) return "nenhum envio ainda";
-    return "último envio há " + tempoCurto((millis() - apiUltimoMs) / 1000UL) + (apiUltimoOk ? " ✅" : " ⚠️");
+  if (id.equals(F("painel"))) {
+    if (apiUrl.length() == 0) return F("envio desligado");
+    if (!apiTentou) return F("nenhum envio ainda");
+    return F("último envio há ") + tempoCurto((millis() - apiUltimoMs) / 1000UL) + (apiUltimoOk ? F(" ✅") : F(" ⚠️"));
   }
-  if (id == "wifi") {
-    if (WiFi.status() != WL_CONNECTED) return "⚠️ desconectado";
-    return htmlEsc(WiFi.SSID()) + " · " + String(WiFi.RSSI()) + " dBm";
+  if (id.equals(F("wifi"))) {
+    if (WiFi.status() != WL_CONNECTED) return F("⚠️ desconectado");
+    return htmlEsc(WiFi.SSID()) + F(" · ") + String(WiFi.RSSI()) + F(" dBm");
   }
-  if (id == "led") {
-    if (!ledStatusAtivo) return "desligado";
-    return ledSegueAgenda ? "ligado · segue o horário da tela" : "ligado";
+  if (id.equals(F("led"))) {
+    if (!ledStatusAtivo) return F("desligado");
+    return ledSegueAgenda ? F("ligado · segue o horário da tela") : F("ligado");
   }
-  return "v" FIRMWARE_VERSAO " · ligado há " + tempoCurto(millis() / 1000UL);   // sistema
+  return F("v" FIRMWARE_VERSAO " · ligado há ") + tempoCurto(millis() / 1000UL);   // sistema
 }
 
 /**
  * Começa uma página da /config: cabeçalhos, estilo (da flash), link de voltar, título e a mensagem
  * de resultado. A página vai em partes (chunked): nenhuma página inteira fica na RAM.
  */
-void cfgCabecalho(const String& titulo, const char* voltaHref, const char* voltaTexto, const String& r) {
-  server.sendHeader("Cache-Control", "no-store");   // página protegida por login: o navegador não guarda cópia
+void cfgCabecalho(const String& titulo, const String& voltaHref, const String& voltaTexto, const String& r) {
+  server.sendHeader(F("Cache-Control"), F("no-store"));   // página protegida por login: o navegador não guarda cópia
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html; charset=utf-8", "");
-  server.sendContent("<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">"
-                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + titulo + "</title>");
+  server.sendContent(F("<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">"
+                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>") + titulo + F("</title>"));
   server.sendContent_P(CFG_CSS);
-  String h = "</head><body><div class=\"wrap\"><a class=\"vol\" href=\"" + String(voltaHref) + "\">‹ " + String(voltaTexto) + "</a>"
-             "<h1>" + titulo + "</h1>";
+  String h = F("</head><body><div class=\"wrap\"><a class=\"vol\" href=\"") + voltaHref + F("\">‹ ") + voltaTexto + F("</a>"
+             "<h1>") + titulo + F("</h1>");
   bool erro = false;
   String m = msgConfig(r, erro);
-  if (m.length()) h += String("<div class=\"msg") + (erro ? " err" : "") + "\">" + m + "</div>";
+  if (m.length()) h += String(F("<div class=\"msg")) + (erro ? F(" err") : F("")) + F("\">") + m + F("</div>");
   server.sendContent(h);
 }
 
@@ -3372,46 +3537,46 @@ void cfgRodape(String& h) {
 
 /** Linha com chave liga/desliga. autoEnvia = salva ao tocar (sem botão). */
 String itemSwitch(const char* nome, const String& rotulo, bool ligado, bool autoEnvia, const String& sub) {
-  String s = "<label class=\"it\"><span class=\"tx\">" + rotulo;
-  if (sub.length()) s += "<small class=\"w\">" + sub + "</small>";
-  s += "</span><input type=\"checkbox\" class=\"sw\" name=\"" + String(nome) + "\" value=\"1\"";
-  if (ligado) s += " checked";
-  if (autoEnvia) s += " onchange=\"this.form.submit()\"";
-  s += "></label>";
+  String s = F("<label class=\"it\"><span class=\"tx\">") + rotulo;
+  if (sub.length()) s += F("<small class=\"w\">") + sub + F("</small>");
+  s += F("</span><input type=\"checkbox\" class=\"sw\" name=\"") + String(nome) + F("\" value=\"1\"");
+  if (ligado) s += F(" checked");
+  if (autoEnvia) s += F(" onchange=\"this.form.submit()\"");
+  s += F("></label>");
   return s;
 }
 
 /** Abre uma linha com lista de opções (feche com '</select></label>'). autoEnvia = salva ao escolher. */
 String itemSelect(const String& rotulo, const char* nome, bool autoEnvia) {
-  String s = "<label class=\"it\"><span class=\"tx\">" + rotulo + "</span><select name=\"" + String(nome) + "\"";
-  if (autoEnvia) s += " onchange=\"this.form.submit()\"";
-  s += ">";
+  String s = F("<label class=\"it\"><span class=\"tx\">") + rotulo + F("</span><select name=\"") + String(nome) + F("\"");
+  if (autoEnvia) s += F(" onchange=\"this.form.submit()\"");
+  s += F(">");
   return s;
 }
 
 /** Uma opção de lista. */
 String opcao(const String& valor, const String& texto, bool sel) {
-  return "<option value=\"" + valor + "\"" + (sel ? " selected" : "") + ">" + texto + "</option>";
+  return F("<option value=\"") + valor + F("\"") + (sel ? F(" selected") : F("")) + F(">") + texto + F("</option>");
 }
 
 // ---- /config: menu ------------------------------------------------------------------------
 
 /** Menu da /config: uma linha por seção, com ícone, nome e resumo do estado, em 3 grupos. */
 void cfgMenu(const String& r) {
-  cfgCabecalho("Configurações", "/", "Início", r);
+  cfgCabecalho(F("Configurações"), F("/"), F("Início"), r);
   String h;
   h.reserve(2200);
   h = F("<div class=\"grp\">");
   for (uint8_t k = 0; k < SECOES_TOTAL; k++) {
     if (k == 3 || k == 6) h += F("</div><div class=\"grp\">");   // novo grupo
-    h += "<a class=\"it\" href=\"/config?s=" + String(SECOES[k].id) + "\">"
-         "<span class=\"ic\" style=\"background:" + String(SECOES[k].cor) + "\">" + String(SECOES[k].icone) + "</span>"
-         "<span class=\"tx\">" + String(SECOES[k].nome) + "<small>" + secaoResumo(k) + "</small></span>"
-         "<span class=\"chev\">›</span></a>";
+    h += F("<a class=\"it\" href=\"/config?s=") + String(FPSTR(SECOES[k].id)) + F("\">"
+         "<span class=\"ic\" style=\"background:") + String(FPSTR(SECOES[k].cor)) + F("\">") + String(FPSTR(SECOES[k].icone)) + F("</span>"
+         "<span class=\"tx\">") + String(FPSTR(SECOES[k].nome)) + F("<small>") + secaoResumo(k) + F("</small></span>"
+         "<span class=\"chev\">›</span></a>");
   }
   h += F("</div>");
   if (loginAtivo()) h += F("<form method=\"POST\" action=\"/sair\"><button class=\"btn sec\" type=\"submit\">Sair (só neste navegador)</button></form>");
-  h += "<div class=\"pe\">WeatherStation ESP8266 · v" FIRMWARE_VERSAO "</div>";
+  h += F("<div class=\"pe\">WeatherStation ESP8266 · v" FIRMWARE_VERSAO "</div>");
   cfgRodape(h);
 }
 
@@ -3419,20 +3584,20 @@ void cfgMenu(const String& r) {
 
 /** Seção 'Cidade e clima': chave da API, cidade (busca pelo nome, latitude/longitude, ID) e idioma. */
 void cfgClima(const String& r) {
-  cfgCabecalho("Cidade e clima", "/config", "Configurações", r);
-  String masked = "cole a chave aqui";
+  cfgCabecalho(F("Cidade e clima"), F("/config"), F("Configurações"), r);
+  String masked = F("cole a chave aqui");
   if (OPEN_WEATHER_MAP_APP_ID.length() >= 4) {
-    masked = "•••••••• " + OPEN_WEATHER_MAP_APP_ID.substring(OPEN_WEATHER_MAP_APP_ID.length() - 4) + " (salva)";
+    masked = F("•••••••• ") + OPEN_WEATHER_MAP_APP_ID.substring(OPEN_WEATHER_MAP_APP_ID.length() - 4) + F(" (salva)");
   }
   String h;
   h.reserve(3600);
-  h = "<div class=\"cap\">Estado</div><div class=\"grp\">" +
-      linhaInfo("Clima", weatherOk ? "✅ " + htmlEsc(currentWeather.cityName) : String("⚠️ sem dados")) +
-      linhaInfo("Coordenadas", coordOk ? String(cidadeLat, 4) + ", " + String(cidadeLon, 4) : String("ainda não recebidas")) +
-      "</div>"
+  h = F("<div class=\"cap\">Estado</div><div class=\"grp\">") +
+      linhaInfo("Clima", weatherOk ? F("✅ ") + htmlEsc(currentWeather.cityName) : String(F("⚠️ sem dados"))) +
+      linhaInfo("Coordenadas", coordOk ? String(cidadeLat, 4) + F(", ") + String(cidadeLon, 4) : String(F("ainda não recebidas"))) +
+      F("</div>"
       "<form method=\"POST\" action=\"/salvar\">"
       "<div class=\"cap\">Chave da API (OpenWeatherMap)</div><div class=\"grp\"><div class=\"fld\">"
-      "<input name=\"apiKey\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\" placeholder=\"" + htmlEsc(masked) + "\">"
+      "<input name=\"apiKey\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\" placeholder=\"") + htmlEsc(masked) + F("\">"
       "</div></div>"
       "<div class=\"note\">Deixe em branco para manter a atual. Crie a sua em "
       "<a href=\"https://home.openweathermap.org/api_keys\" target=\"_blank\" rel=\"noopener\">home.openweathermap.org/api_keys</a> "
@@ -3444,19 +3609,19 @@ void cfgClima(const String& r) {
       "<button type=\"button\" class=\"mini\" onclick=\"busca()\">Buscar</button></div>"
       "<div id=\"br\" class=\"res\">Escolha um resultado para preencher a latitude e a longitude.</div></div>"
       "<label class=\"it\"><span class=\"tx\">Latitude</span><input class=\"num\" name=\"lat\" id=\"lat\" type=\"text\" inputmode=\"decimal\" "
-      "placeholder=\"-22.9056\" value=\"" + (coordOk ? String(cidadeLat, 4) : String("")) + "\"></label>"
+      "placeholder=\"-22.9056\" value=\"") + (coordOk ? String(cidadeLat, 4) : String("")) + F("\"></label>"
       "<label class=\"it\"><span class=\"tx\">Longitude</span><input class=\"num\" name=\"lon\" id=\"lon\" type=\"text\" inputmode=\"decimal\" "
-      "placeholder=\"-47.0608\" value=\"" + (coordOk ? String(cidadeLon, 4) : String("")) + "\"></label>"
+      "placeholder=\"-47.0608\" value=\"") + (coordOk ? String(cidadeLon, 4) : String("")) + F("\"></label>"
       "<label class=\"it\"><span class=\"tx\">ID da cidade<small>opcional</small></span><input class=\"num\" name=\"locId\" id=\"loc\" "
-      "type=\"text\" inputmode=\"numeric\" value=\"" + htmlEsc(OPEN_WEATHER_MAP_LOCATION_ID) + "\"></label>"
-      "</div>";
+      "type=\"text\" inputmode=\"numeric\" value=\"") + htmlEsc(OPEN_WEATHER_MAP_LOCATION_ID) + F("\"></label>"
+      "</div>");
   h += F("<div class=\"note\">Com a latitude e a longitude, valem elas; o ID, se houver, só vai para o painel (city_id). "
       "Só com o ID, a estação descobre as coordenadas na 1ª consulta. Também pode colar \"latitude, longitude\" (como o Google Maps copia) "
       "no campo da latitude. A busca usa a chave já salva. ID: "
       "<a href=\"https://openweathermap.org/find\" target=\"_blank\" rel=\"noopener\">openweathermap.org/find</a> (número no fim do endereço).</div>");
   server.sendContent(h);
-  h = "<div class=\"cap\">Idioma das descrições</div><div class=\"grp\">" + itemSelect("Idioma", "lang", false);
-  for (uint8_t k = 0; k < LANG_COUNT; k++) h += opcao(LANG_CODES[k], LANG_NAMES[k], OPEN_WEATHER_MAP_LANGUAGE == LANG_CODES[k]);
+  h = F("<div class=\"cap\">Idioma das descrições</div><div class=\"grp\">") + itemSelect(F("Idioma"), "lang", false);
+  for (uint8_t k = 0; k < LANG_COUNT; k++) h += opcao(LANG_CODES[k], FPSTR(LANG_NAMES[k]), OPEN_WEATHER_MAP_LANGUAGE == LANG_CODES[k]);
   h += F("</select></label></div>"
        "<button class=\"btn\" type=\"submit\">Salvar e atualizar</button></form>"
        "<script>"
@@ -3482,66 +3647,66 @@ void cfgClima(const String& r) {
  * automático. Listas e chaves salvam ao tocar; listas longas abrem na própria página (›).
  */
 void cfgDisplay(const String& r) {
-  cfgCabecalho("Display", "/config", "Configurações", r);
+  cfgCabecalho(F("Display"), F("/config"), F("Configurações"), r);
   String h;
   h.reserve(3000);
   // Tela ligada (a chave alterna) e o brilho de agora
-  h = "<div class=\"cap\">Tela</div><div class=\"grp\">"
-      "<form method=\"POST\" action=\"/display\"><input type=\"hidden\" name=\"estado\" value=\"t\"><input type=\"hidden\" name=\"volta\" value=\"1\">" +
-      itemSwitch("x", "Tela ligada", displayLigado, true) + "</form>" +
-      linhaInfo("Brilho agora", String(brilhoAgora()) + "%" + (noiteAgora() ? " (noturno)" : "")) + "</div>";
+  h = F("<div class=\"cap\">Tela</div><div class=\"grp\">"
+      "<form method=\"POST\" action=\"/display\"><input type=\"hidden\" name=\"estado\" value=\"t\"><input type=\"hidden\" name=\"volta\" value=\"1\">") +
+      itemSwitch("x", F("Tela ligada"), displayLigado, true) + F("</form>") +
+      linhaInfo("Brilho agora", String(brilhoAgora()) + F("%") + (noiteAgora() ? F(" (noturno)") : F(""))) + F("</div>");
 
   // Telas do display (abre na própria página)
   h += F("<div class=\"cap\">Telas e horário</div>"
        "<details class=\"grp\"");
-  if (r == "telas" || r == "telas_erro") h += F(" open");
-  h += "><summary class=\"it\"><span class=\"tx\">Telas do display</span><span class=\"val\">" + String(numTelasAtivas) + " de " +
-       String(TELAS_TOTAL) + "</span><span class=\"chev\">›</span></summary><form method=\"POST\" action=\"/telas\">";
+  if (r.equals(F("telas")) || r.equals(F("telas_erro"))) h += F(" open");
+  h += F("><summary class=\"it\"><span class=\"tx\">Telas do display</span><span class=\"val\">") + String(numTelasAtivas) + F(" de ") +
+       String(TELAS_TOTAL) + F("</span><span class=\"chev\">›</span></summary><form method=\"POST\" action=\"/telas\">");
   for (uint8_t k = 0; k < TELAS_TOTAL; k++) {
-    h += itemSwitch(("t" + String(k)).c_str(), TELAS_NOME[k], telasMask & (1 << k), false,
-                    k == TELA_WIFI ? String("mostra o IP no display") : String(""));
+    h += itemSwitch((F("t") + String(k)).c_str(), FPSTR(TELAS_NOME[k]), telasMask & (1 << k), false,
+                    k == TELA_WIFI ? String(F("mostra o IP no display")) : String(""));
   }
   h += F("<div class=\"fld\"><button class=\"btn\" type=\"submit\">Salvar telas</button></div></form></details>");
   server.sendContent(h);
 
   // Horário automático (abre na própria página)
   h = F("<details class=\"grp\"");
-  if (r == "agenda" || r == "hora" || r == "horaigual") h += F(" open");
-  h += "><summary class=\"it\"><span class=\"tx\">Horário automático</span><span class=\"val\">" +
-       (agendaAtiva ? formataHora(agendaLiga) + "–" + formataHora(agendaDesliga) : String("desligado")) +
-       "</span><span class=\"chev\">›</span></summary><form method=\"POST\" action=\"/agenda\">" +
-       itemSwitch("ativa", "Ligar e apagar sozinha", agendaAtiva, false) +
-       "<label class=\"it\"><span class=\"tx\">Ligar às</span><input type=\"time\" name=\"liga\" value=\"" + formataHora(agendaLiga) + "\"></label>"
-       "<label class=\"it\"><span class=\"tx\">Apagar às</span><input type=\"time\" name=\"desliga\" value=\"" + formataHora(agendaDesliga) + "\"></label>"
-       "<div class=\"fld\"><button class=\"btn\" type=\"submit\">Salvar horário</button></div></form></details>";
+  if (r.equals(F("agenda")) || r.equals(F("hora")) || r.equals(F("horaigual"))) h += F(" open");
+  h += F("><summary class=\"it\"><span class=\"tx\">Horário automático</span><span class=\"val\">") +
+       (agendaAtiva ? formataHora(agendaLiga) + F("–") + formataHora(agendaDesliga) : String(F("desligado"))) +
+       F("</span><span class=\"chev\">›</span></summary><form method=\"POST\" action=\"/agenda\">") +
+       itemSwitch("ativa", F("Ligar e apagar sozinha"), agendaAtiva, false) +
+       F("<label class=\"it\"><span class=\"tx\">Ligar às</span><input type=\"time\" name=\"liga\" value=\"") + formataHora(agendaLiga) + F("\"></label>"
+       "<label class=\"it\"><span class=\"tx\">Apagar às</span><input type=\"time\" name=\"desliga\" value=\"") + formataHora(agendaDesliga) + F("\"></label>"
+       "<div class=\"fld\"><button class=\"btn\" type=\"submit\">Salvar horário</button></div></form></details>");
   h += F("<div class=\"note\">Elas passam na ordem da lista; com uma só, ela fica fixa. Sem a tela \"WiFi e bateria\", o IP aparece só ao conectar. "
        "O botão manual da tela vale até o próximo horário programado (precisa da hora da internet).</div>");
 
   // Passagem das telas e tempo de tela ligada (salvam ao escolher)
-  h += "<div class=\"cap\">Passagem</div><div class=\"grp\"><form method=\"POST\" action=\"/tempotela\">" +
-       itemSelect("Tempo de cada tela", "seg", true);
-  for (uint8_t sgs = 5; sgs <= 30; sgs += 5) h += opcao(String(sgs), String(sgs) + " s", sgs == telaSeg);
-  h += "</select></label></form><form method=\"POST\" action=\"/tempoligada\">" + itemSelect("Apagar sozinha após", "min", true);
+  h += F("<div class=\"cap\">Passagem</div><div class=\"grp\"><form method=\"POST\" action=\"/tempotela\">") +
+       itemSelect(F("Tempo de cada tela"), "seg", true);
+  for (uint8_t sgs = 5; sgs <= 30; sgs += 5) h += opcao(String(sgs), String(sgs) + F(" s"), sgs == telaSeg);
+  h += F("</select></label></form><form method=\"POST\" action=\"/tempoligada\">") + itemSelect(F("Apagar sozinha após"), "min", true);
   static const uint8_t OPCOES_MIN[] = {0, 1, 5, 10, 15, 30, 60};
   for (uint8_t k = 0; k < 7; k++) {
-    h += opcao(String(OPCOES_MIN[k]), OPCOES_MIN[k] == 0 ? String("Nunca") : String(OPCOES_MIN[k]) + " min", OPCOES_MIN[k] == telaTimeoutMin);
+    h += opcao(String(OPCOES_MIN[k]), OPCOES_MIN[k] == 0 ? String(F("Nunca")) : String(OPCOES_MIN[k]) + F(" min"), OPCOES_MIN[k] == telaTimeoutMin);
   }
   h += F("</select></label></form></div>"
        "<div class=\"note\">Com a tela apagada, um clique no botão das telas acende; no horário de apagar, acende só por 10 s.</div>");
   server.sendContent(h);
 
   // Brilho (salva ao escolher)
-  h = "<div class=\"cap\">Brilho</div><div class=\"grp\"><form method=\"POST\" action=\"/brilho\">" + itemSelect("Dia", "dia", true);
-  for (uint8_t p = 100; p >= 5; p -= 5) h += opcao(String(p), String(p) + "%", p == brilhoPct);
-  h += "</select></label>" + itemSelect("Noite", "noite", true);
-  for (uint8_t p = 100; p >= 5; p -= 5) h += opcao(String(p), String(p) + "%", p == brilhoNoitePct);
-  h += "</select></label>" + itemSelect("A noite começa", "fonte", true) +
-       opcao("0", "No horário automático", !noitePeloSol) + opcao("1", "No pôr do sol", noitePeloSol) +
-       "</select></label>" + itemSelect("No horário de apagar", "modo", true) +
-       opcao("0", "Apagar a tela", !noiteDiminui) + opcao("1", "Manter acesa", noiteDiminui) +
-       "</select></label></form></div>"
-       "<div class=\"note\">Pôr do sol: o brilho noturno vale do pôr ao nascer do sol (";
-  h += astroOk ? "hoje " + horaCurta(solPoe) + " a " + horaCurta(solNasce) : String("disponível depois de receber o clima");
+  h = F("<div class=\"cap\">Brilho</div><div class=\"grp\"><form method=\"POST\" action=\"/brilho\">") + itemSelect(F("Dia"), "dia", true);
+  for (uint8_t p = 100; p >= 5; p -= 5) h += opcao(String(p), String(p) + F("%"), p == brilhoPct);
+  h += F("</select></label>") + itemSelect(F("Noite"), "noite", true);
+  for (uint8_t p = 100; p >= 5; p -= 5) h += opcao(String(p), String(p) + F("%"), p == brilhoNoitePct);
+  h += F("</select></label>") + itemSelect(F("A noite começa"), "fonte", true) +
+       opcao(F("0"), F("No horário automático"), !noitePeloSol) + opcao(F("1"), F("No pôr do sol"), noitePeloSol) +
+       F("</select></label>") + itemSelect(F("No horário de apagar"), "modo", true) +
+       opcao(F("0"), F("Apagar a tela"), !noiteDiminui) + opcao(F("1"), F("Manter acesa"), noiteDiminui) +
+       F("</select></label></form></div>"
+       "<div class=\"note\">Pôr do sol: o brilho noturno vale do pôr ao nascer do sol (");
+  h += astroOk ? F("hoje ") + horaCurta(solPoe) + F(" a ") + horaCurta(solNasce) : String(F("disponível depois de receber o clima"));
   h += F("). Horário automático: vale no horário de apagar. Acender a tela à noite usa sempre o brilho noturno.</div>");
   cfgRodape(h);
 }
@@ -3550,8 +3715,8 @@ void cfgDisplay(const String& r) {
 
 /** Seção 'Data e hora': hora atual, fuso e horário de verão (salvam ao escolher) e servidores NTP. */
 void cfgHora(const String& r) {
-  cfgCabecalho("Data e hora", "/config", "Configurações", r);
-  String agora = "sem sincronização";
+  cfgCabecalho(F("Data e hora"), F("/config"), F("Configurações"), r);
+  String agora = F("sem sincronização");
   if (horaOk()) {
     time_t t = time(nullptr);
     struct tm* ti = localtime(&t);
@@ -3561,13 +3726,13 @@ void cfgHora(const String& r) {
   }
   String h;
   h.reserve(2600);
-  h = "<div class=\"grp\">" + linhaInfo("Agora", agora) + "</div>"
-      "<div class=\"cap\">Fuso horário</div><div class=\"grp\"><form method=\"POST\" action=\"/hora\">" + itemSelect("Fuso", "fuso", true);
-  for (uint8_t k = 0; k < FUSO_COUNT; k++) h += opcao(String(FUSOS[k].min), FUSOS[k].nome, FUSOS[k].min == fusoMin);
-  h += "</select></label>" + itemSwitch("verao", "Horário de verão", horarioVerao, true, "adianta 1 hora") + "</form></div>"
-       "<div class=\"cap\">Servidores da hora (NTP)</div><div class=\"grp\">" +
-       linhaInfo("1º", NTP_SERVIDOR_1) + linhaInfo("2º", NTP_SERVIDOR_2) + linhaInfo("3º", NTP_SERVIDOR_3) + "</div>"
-       "<div class=\"note\">Os servidores são definidos no WeatherStationConfig.h e usados na ordem, se um não responder.</div>";
+  h = F("<div class=\"grp\">") + linhaInfo("Agora", agora) + F("</div>"
+      "<div class=\"cap\">Fuso horário</div><div class=\"grp\"><form method=\"POST\" action=\"/hora\">") + itemSelect(F("Fuso"), "fuso", true);
+  for (uint8_t k = 0; k < FUSO_COUNT; k++) h += opcao(String(FUSOS[k].min), FPSTR(FUSOS[k].nome), FUSOS[k].min == fusoMin);
+  h += F("</select></label>") + itemSwitch("verao", F("Horário de verão"), horarioVerao, true, F("adianta 1 hora")) + F("</form></div>"
+       "<div class=\"cap\">Servidores da hora (NTP)</div><div class=\"grp\">") +
+       linhaInfo("1º", NTP_SERVIDOR_1) + linhaInfo("2º", NTP_SERVIDOR_2) + linhaInfo("3º", NTP_SERVIDOR_3) + F("</div>"
+       "<div class=\"note\">Os servidores são definidos no WeatherStationConfig.h e usados na ordem, se um não responder.</div>");
   cfgRodape(h);
 }
 
@@ -3575,14 +3740,32 @@ void cfgHora(const String& r) {
 
 /** Seção 'Bateria e energia': ativar a leitura da bateria e o sensor da UPS (salvam ao tocar) e o estado. */
 void cfgBateria(const String& r) {
-  cfgCabecalho("Bateria e energia", "/config", "Configurações", r);
+  cfgCabecalho(F("Bateria e energia"), F("/config"), F("Configurações"), r);
   String h;
-  h.reserve(1800);
-  h = "<div class=\"grp\"><form method=\"POST\" action=\"/bateria\">" +
-      itemSwitch("ativa", "Bateria no A0", bateriaAtiva, true, "este ESP tem bateria ligada ao A0 pelo divisor") +
-      itemSwitch("energia", "Placa UPS", energiaAtiva, true, "sensor de energia externa (5 V) no pino de energia") +
-      "</form></div>";
-  if (bateriaAtiva || energiaAtiva) h += "<div class=\"cap\">Estado</div>" + tabelaBateria();
+  h.reserve(2800);
+  h = F("<div class=\"grp\"><form method=\"POST\" action=\"/bateria\">") +
+      itemSwitch("ativa", F("Bateria no A0"), bateriaAtiva, true, F("este ESP tem bateria ligada ao A0 pelo divisor")) +
+      itemSwitch("energia", F("Placa UPS"), energiaAtiva, true, F("sensor de energia externa (5 V) no pino de energia")) +
+      F("</form></div>");
+  // Economia na bateria (light sleep do WiFi): só faz sentido com a placa UPS, que avisa quando falta energia
+  h += F("<div class=\"cap\">Economia na bateria</div>");
+  if (energiaAtiva && PIN_ENERGIA >= 0) {
+    h += F("<div class=\"grp\"><form method=\"POST\" action=\"/economia\">") +
+         itemSwitch("eco", F("Economia na bateria"), ecoBateria, true, F("sem energia externa, o WiFi dorme entre os acessos")) +
+         itemSelect(F("Envio ao painel na bateria"), "int", true);
+    static const uint8_t OPCOES_ECO[] = {15, 20, 30, 45, 60};
+    for (uint8_t k = 0; k < 5; k++) h += opcao(String(OPCOES_ECO[k]), F("a cada ") + String(OPCOES_ECO[k]) + F(" min"), OPCOES_ECO[k] == ecoIntervaloMin);
+    h += F("</select></label></form>");
+    h += linhaInfo("Agora", !ecoBateria ? String(F("Desligada")) : naBateria() ? String(F("🔋 Ativa (na bateria)")) : String(F("🔌 Em espera (na tomada)")));
+    h += F("</div>");
+    h += F("<div class=\"note\">Na bateria, o ESP gasta bem menos com o WiFi parado. Abrir esta página ou apertar um botão "
+           "deixa o ESP acordado por ");
+    h += String(ECO_ACORDADO_MS / 60000UL);
+    h += F(" min: só o primeiro acesso demora um pouco mais. Na tomada, nada muda.</div>");
+  } else {
+    h += F("<div class=\"note\">Ative a placa UPS acima: a economia usa o sensor de energia para saber quando o ESP está na bateria.</div>");
+  }
+  if (bateriaAtiva || energiaAtiva) h += F("<div class=\"cap\">Estado</div>") + tabelaBateria();
   else h += F("<div class=\"note\">Ative só o que este ESP tem ligado (veja as ligações no README).</div>");
   cfgRodape(h);
 }
@@ -3591,29 +3774,29 @@ void cfgBateria(const String& r) {
 
 /** Seção 'Painel web': último envio, dados do painel (ID, URL, DEVICE_KEY) e 'Enviar dados agora'. */
 void cfgPainel(const String& r) {
-  cfgCabecalho("Painel web", "/config", "Configurações", r);
-  String maskedKey = "cole a DEVICE_KEY aqui";
-  if (deviceKey.length() >= 4) maskedKey = "•••••••• " + deviceKey.substring(deviceKey.length() - 4) + " (salva)";
-  String ultimo = !apiTentou ? String("nenhum ainda")
-                : "há " + tempoCurto((millis() - apiUltimoMs) / 1000UL) + (apiUltimoOk ? " · ✅ " : " · ⚠️ ") + htmlEsc(apiUltimoMsg);
-  String cidade = currentWeather.cityName.length() ? htmlEsc(currentWeather.cityName) : String("(ainda não recebida)");
-  cidade += OPEN_WEATHER_MAP_LOCATION_ID.length() ? " · ID " + htmlEsc(OPEN_WEATHER_MAP_LOCATION_ID) : String(" · sem ID (null)");
+  cfgCabecalho(F("Painel web"), F("/config"), F("Configurações"), r);
+  String maskedKey = F("cole a DEVICE_KEY aqui");
+  if (deviceKey.length() >= 4) maskedKey = F("•••••••• ") + deviceKey.substring(deviceKey.length() - 4) + F(" (salva)");
+  String ultimo = !apiTentou ? String(F("nenhum ainda"))
+                : F("há ") + tempoCurto((millis() - apiUltimoMs) / 1000UL) + (apiUltimoOk ? F(" · ✅ ") : F(" · ⚠️ ")) + htmlEsc(apiUltimoMsg);
+  String cidade = currentWeather.cityName.length() ? htmlEsc(currentWeather.cityName) : String(F("(ainda não recebida)"));
+  cidade += OPEN_WEATHER_MAP_LOCATION_ID.length() ? F(" · ID ") + htmlEsc(OPEN_WEATHER_MAP_LOCATION_ID) : String(F(" · sem ID (null)"));
   String h;
   h.reserve(2600);
-  h = "<div class=\"cap\">Envio</div><div class=\"grp\">" +
+  h = F("<div class=\"cap\">Envio</div><div class=\"grp\">") +
       linhaInfo("Último envio", ultimo) +
-      linhaInfo("Automático", apiUrl.length() ? "a cada " + String(PAINEL_INTERVAL_MS / 60000UL) + " min" : String("desligado (sem URL)")) +
-      linhaInfo("Cidade enviada", cidade) + "</div>"
+      linhaInfo("Automático", apiUrl.length() ? F("a cada ") + String(intervaloEnvioMs() / 60000UL) + F(" min") + (intervaloEnvioMs() != PAINEL_INTERVAL_MS ? F(" (economia na bateria)") : F("")) : String(F("desligado (sem URL)"))) +
+      linhaInfo("Cidade enviada", cidade) + F("</div>"
       "<form method=\"POST\" action=\"/enviar\"><button class=\"btn sec\" type=\"submit\">Enviar dados agora</button></form>"
       "<form method=\"POST\" action=\"/api\"><div class=\"cap\">Dados do painel</div><div class=\"grp\">"
       "<div class=\"fld\"><span class=\"lb\">ID do dispositivo (device_id)</span>"
-      "<input name=\"deviceId\" type=\"text\" autocapitalize=\"off\" value=\"" + htmlEsc(idDispositivo()) + "\"></div>"
+      "<input name=\"deviceId\" type=\"text\" autocapitalize=\"off\" value=\"") + htmlEsc(idDispositivo()) + F("\"></div>"
       "<div class=\"fld\"><span class=\"lb\">URL da API</span>"
-      "<input name=\"apiUrl\" type=\"text\" inputmode=\"url\" autocapitalize=\"off\" placeholder=\"https://seu-app.vercel.app/api/...\" value=\"" +
-      htmlEsc(apiUrl) + "\"></div>"
+      "<input name=\"apiUrl\" type=\"text\" inputmode=\"url\" autocapitalize=\"off\" placeholder=\"https://seu-app.vercel.app/api/...\" value=\"") +
+      htmlEsc(apiUrl) + F("\"></div>"
       "<div class=\"fld\"><span class=\"lb\">DEVICE_KEY</span>"
-      "<input name=\"deviceKey\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\" placeholder=\"" + htmlEsc(maskedKey) + "\"></div>"
-      "</div>";
+      "<input name=\"deviceKey\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\" placeholder=\"") + htmlEsc(maskedKey) + F("\"></div>"
+      "</div>");
   h += F("<div class=\"note\">O ID precisa ser igual ao cadastrado no painel. Deixe a chave em branco para manter a atual. "
       "Use https:// (a Vercel redireciona o http). Sem URL, o envio fica desligado.</div>"
       "<button class=\"btn\" type=\"submit\">Salvar dados do painel</button></form>");
@@ -3624,13 +3807,13 @@ void cfgPainel(const String& r) {
 
 /** Seção 'WiFi': dados da conexão, abrir o portal e apagar a rede salva. */
 void cfgWiFi(const String& r) {
-  cfgCabecalho("WiFi", "/config", "Configurações", r);
+  cfgCabecalho(F("WiFi"), F("/config"), F("Configurações"), r);
   String h = tabelaWiFi();
-  h += "<form method=\"POST\" action=\"/portal\" onsubmit=\"return confirm('Abrir o portal de configuração? A estação reinicia ao terminar.')\">"
+  h += F("<form method=\"POST\" action=\"/portal\" onsubmit=\"return confirm('Abrir o portal de configuração? A estação reinicia ao terminar.')\">"
        "<button class=\"btn sec\" type=\"submit\">Abrir portal de configuração</button></form>"
        "<form method=\"POST\" action=\"/reset-wifi\" onsubmit=\"return confirm('Apagar a rede WiFi salva e reiniciar?')\">"
        "<button class=\"btn red\" type=\"submit\">Apagar dados de WiFi</button></form>"
-       "<div class=\"note\" style=\"margin-top:-8px\">O portal cria a rede " PORTAL_SSID " (com a senha PORTAL_SENHA do WeatherStationConfig.h).</div>";
+       "<div class=\"note\" style=\"margin-top:-8px\">O portal cria a rede " PORTAL_SSID " (com a senha PORTAL_SENHA do WeatherStationConfig.h).</div>");
   cfgRodape(h);
 }
 
@@ -3638,13 +3821,13 @@ void cfgWiFi(const String& r) {
 
 /** Seção 'LED de status': ligar/desligar e seguir o horário automático da tela (salvam ao tocar). */
 void cfgLed(const String& r) {
-  cfgCabecalho("LED de status", "/config", "Configurações", r);
-  String h = "<div class=\"grp\"><form method=\"POST\" action=\"/led\">" +
-             itemSwitch("ativo", "Piscar para indicar o estado", ledStatusAtivo, true,
-                        "rápido ao conectar e ao enviar, devagar sem WiFi; 1 acendida = sucesso, 3 piscadas = falha") +
-             itemSwitch("agenda", "Seguir o horário da tela", ledSegueAgenda, true,
-                        "apagado no horário de tela desligada (precisa do horário automático)") +
-             "</form></div>";
+  cfgCabecalho(F("LED de status"), F("/config"), F("Configurações"), r);
+  String h = F("<div class=\"grp\"><form method=\"POST\" action=\"/led\">") +
+             itemSwitch("ativo", F("Piscar para indicar o estado"), ledStatusAtivo, true,
+                        F("rápido ao conectar e ao enviar, devagar sem WiFi; 1 acendida = sucesso, 3 piscadas = falha")) +
+             itemSwitch("agenda", F("Seguir o horário da tela"), ledSegueAgenda, true,
+                        F("apagado no horário de tela desligada (precisa do horário automático)")) +
+             F("</form></div>");
   cfgRodape(h);
 }
 
@@ -3652,16 +3835,16 @@ void cfgLed(const String& r) {
 
 /** Seção 'Sistema': informações do ESP8266, login (desconectar todos) e reset geral. */
 void cfgSistema(const String& r) {
-  cfgCabecalho("Sistema", "/config", "Configurações", r);
+  cfgCabecalho(F("Sistema"), F("/config"), F("Configurações"), r);
   String h = tabelaSistema();
   server.sendContent(h);
   h = F("");
   if (loginAtivo()) {
-    h += "<div class=\"cap\">Login</div>"
+    h += F("<div class=\"cap\">Login</div>"
          "<form method=\"POST\" action=\"/sair-todos\" onsubmit=\"return confirm('Desconectar todos os navegadores? Todos vão precisar digitar a senha de novo.')\">"
          "<button class=\"btn sec\" type=\"submit\">Desconectar todos os navegadores</button></form>"
-         "<div class=\"note\" style=\"margin-top:-8px\">Cada navegador fica conectado por " + String(LOGIN_DIAS) + " dias. "
-         "Use se perdeu um celular ou entrou num computador de outra pessoa.</div>";
+         "<div class=\"note\" style=\"margin-top:-8px\">Cada navegador fica conectado por ") + String(LOGIN_DIAS) + F(" dias. "
+         "Use se perdeu um celular ou entrou num computador de outra pessoa.</div>");
   }
   h += F("<div class=\"cap\">Reset geral</div>"
        "<form method=\"POST\" action=\"/reset-geral\" onsubmit=\"return confirm('Apagar o WiFi e TODOS os ajustes e reiniciar?')\">"
@@ -3674,16 +3857,16 @@ void cfgSistema(const String& r) {
 /** GET /config: o menu, ou a seção pedida em ?s= (cada uma é uma página pequena, enviada em partes). */
 void paginaConfig() {
   if (!exigeLogin()) return;            // sem login: vai para /login
-  String s = server.arg("s");
-  String r = server.arg("r");
-  if (s == "clima") cfgClima(r);
-  else if (s == "display") cfgDisplay(r);
-  else if (s == "hora") cfgHora(r);
-  else if (s == "bateria") cfgBateria(r);
-  else if (s == "painel") cfgPainel(r);
-  else if (s == "wifi") cfgWiFi(r);
-  else if (s == "led") cfgLed(r);
-  else if (s == "sistema") cfgSistema(r);
+  String s = server.arg(F("s"));
+  String r = server.arg(F("r"));
+  if (s.equals(F("clima"))) cfgClima(r);
+  else if (s.equals(F("display"))) cfgDisplay(r);
+  else if (s.equals(F("hora"))) cfgHora(r);
+  else if (s.equals(F("bateria"))) cfgBateria(r);
+  else if (s.equals(F("painel"))) cfgPainel(r);
+  else if (s.equals(F("wifi"))) cfgWiFi(r);
+  else if (s.equals(F("led"))) cfgLed(r);
+  else if (s.equals(F("sistema"))) cfgSistema(r);
   else cfgMenu(r);
 }
 
@@ -3708,21 +3891,21 @@ String urlEncode(const String& s) {
  * para a seção Cidade e clima preencher a latitude e a longitude. Precisa estar logado.
  */
 void handleBuscaCidade() {
-  server.sendHeader("Cache-Control", "no-store");
-  if (!logado()) { server.send(401, "application/json", "{\"ok\":false,\"erro\":\"Faça o login de novo (recarregue a página).\"}"); return; }
-  String q = server.arg("q");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  if (!logado()) { server.send(401, "application/json", PSTR("{\"ok\":false,\"erro\":\"Faça o login de novo (recarregue a página).\"}")); return; }
+  String q = server.arg(F("q"));
   q.trim();
-  if (q.length() < 2 || q.length() > 60) { server.send(200, "application/json", "{\"ok\":false,\"erro\":\"Digite de 2 a 60 caracteres.\"}"); return; }
-  if (OPEN_WEATHER_MAP_APP_ID.length() == 0) { server.send(200, "application/json", "{\"ok\":false,\"erro\":\"Salve primeiro a chave da API (campo acima).\"}"); return; }
-  if (WiFi.status() != WL_CONNECTED) { server.send(200, "application/json", "{\"ok\":false,\"erro\":\"Sem WiFi.\"}"); return; }
+  if (q.length() < 2 || q.length() > 60) { server.send(200, "application/json", PSTR("{\"ok\":false,\"erro\":\"Digite de 2 a 60 caracteres.\"}")); return; }
+  if (OPEN_WEATHER_MAP_APP_ID.length() == 0) { server.send(200, "application/json", PSTR("{\"ok\":false,\"erro\":\"Salve primeiro a chave da API (campo acima).\"}")); return; }
+  if (WiFi.status() != WL_CONNECTED) { server.send(200, "application/json", PSTR("{\"ok\":false,\"erro\":\"Sem WiFi.\"}")); return; }
 
   WiFiClient cliente;
   HTTPClient http;
   http.setTimeout(8000);
   http.useHTTP10(true);                 // resposta sem 'chunked': o leitor recebe o JSON puro
-  String url = "http://api.openweathermap.org/geo/1.0/direct?q=" + urlEncode(q) + "&limit=" + String(BuscaCidade::MAX) +
-               "&appid=" + OPEN_WEATHER_MAP_APP_ID;
-  if (!http.begin(cliente, url)) { server.send(200, "application/json", "{\"ok\":false,\"erro\":\"Falha ao preparar a busca.\"}"); return; }
+  String url = F("http://api.openweathermap.org/geo/1.0/direct?q=") + urlEncode(q) + F("&limit=") + String(BuscaCidade::MAX) +
+               F("&appid=") + OPEN_WEATHER_MAP_APP_ID;
+  if (!http.begin(cliente, url)) { server.send(200, "application/json", PSTR("{\"ok\":false,\"erro\":\"Falha ao preparar a busca.\"}")); return; }
   int codigo = http.GET();
 
   BuscaCidade busca;
@@ -3740,17 +3923,17 @@ void handleBuscaCidade() {
 
   String j;
   if (codigo != 200) {
-    String e = (codigo == 401) ? String("Chave da API inválida ou ainda não ativada.")
-             : (codigo > 0) ? "HTTP " + String(codigo) + (busca.erro.length() ? ": " + busca.erro : String(""))
+    String e = (codigo == 401) ? String(F("Chave da API inválida ou ainda não ativada."))
+             : (codigo > 0) ? F("HTTP ") + String(codigo) + (busca.erro.length() ? F(": ") + busca.erro : String(""))
              : HTTPClient::errorToString(codigo);
-    j = "{\"ok\":false,\"erro\":\"" + jsonEscape(e) + "\"}";
+    j = F("{\"ok\":false,\"erro\":\"") + jsonEscape(e) + F("\"}");
   } else {
     j = F("{\"ok\":true,\"cidades\":[");
     for (uint8_t k = 0; k < busca.n; k++) {
       BuscaCidade::Resultado& c = busca.r[k];
       if (k) j += F(",");
-      j += "{\"nome\":\"" + jsonEscape(c.nomePt.length() ? c.nomePt : c.nome) + "\",\"estado\":\"" + jsonEscape(c.estado) +
-           "\",\"pais\":\"" + jsonEscape(c.pais) + "\",\"lat\":" + String(c.lat, 4) + ",\"lon\":" + String(c.lon, 4) + "}";
+      j += F("{\"nome\":\"") + jsonEscape(c.nomePt.length() ? c.nomePt : c.nome) + F("\",\"estado\":\"") + jsonEscape(c.estado) +
+           F("\",\"pais\":\"") + jsonEscape(c.pais) + F("\",\"lat\":") + String(c.lat, 4) + F(",\"lon\":") + String(c.lon, 4) + F("}");
     }
     j += F("]}");
   }
@@ -3780,10 +3963,10 @@ int8_t parseCoord(String s, float& out, float minimo, float maximo) {
 void handleSalvar() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  String key = server.arg("apiKey");
+  String key = server.arg(F("apiKey"));
   key.trim();
-  String lang = server.arg("lang");
-  String locRaw = server.arg("locId");
+  String lang = server.arg(F("lang"));
+  String locRaw = server.arg(F("locId"));
 
   // ID da cidade: usa a última sequência de dígitos (aceita colar o endereço inteiro)
   String loc = "";
@@ -3803,8 +3986,8 @@ void handleSalvar() {
   if (loc.length() > 10) { redirecionaConfig("local"); return; }
 
   // Coordenadas: opcionais. Aceita colar 'lat, lon' (como o Google Maps copia) no campo da latitude.
-  String latRaw = server.arg("lat");
-  String lonRaw = server.arg("lon");
+  String latRaw = server.arg(F("lat"));
+  String lonRaw = server.arg(F("lon"));
   latRaw.trim();
   lonRaw.trim();
   int virgula = latRaw.indexOf(',');
@@ -3828,10 +4011,10 @@ void handleSalvar() {
   if (!okLang) { redirecionaConfig("idioma"); return; }
 
   // Fuso horário (se o formulário não trouxer o campo, mantém o atual)
-  bool trocaFuso = server.hasArg("fuso");
+  bool trocaFuso = server.hasArg(F("fuso"));
   int fuso = fusoMin;
   if (trocaFuso) {
-    fuso = server.arg("fuso").toInt();
+    fuso = server.arg(F("fuso")).toInt();
     bool okFuso = false;
     for (uint8_t k = 0; k < FUSO_COUNT; k++) {
       if (FUSOS[k].min == fuso) okFuso = true;
@@ -3860,7 +4043,7 @@ void handleSalvar() {
   OPEN_WEATHER_MAP_LANGUAGE = lang;
   if (trocaFuso) {
     fusoMin = fuso;
-    horarioVerao = server.hasArg("verao");
+    horarioVerao = server.hasArg(F("verao"));
     aplicaFuso();                        // reinicia o NTP com o novo fuso
     agendaUltimoEstado = -1;             // a agenda da tela reavalia com a nova hora
   }
@@ -3879,11 +4062,11 @@ void handleSalvar() {
 void handleApi() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  String url = server.arg("apiUrl");
+  String url = server.arg(F("apiUrl"));
   url.trim();
-  String key = server.arg("deviceKey");
+  String key = server.arg(F("deviceKey"));
   key.trim();
-  String id = server.arg("deviceId");
+  String id = server.arg(F("deviceId"));
   id.trim();
 
   if (url.length() > 0) {
@@ -3924,7 +4107,7 @@ void handleEnviar() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
   bool ok = enviaParaApi();
-  if (ok) nextApi = millis() + PAINEL_INTERVAL_MS;       // recomeça o ciclo do envio automático
+  if (ok) nextApi = millis() + intervaloEnvioMs();       // recomeça o ciclo do envio automático
   redirecionaConfig(ok ? "envio_ok" : "envio_erro");
 }
 
@@ -3935,8 +4118,8 @@ void handleEnviar() {
 void handleTempoLigada() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  int mn = server.arg("min").toInt();
-  bool valido = server.hasArg("min") && (mn == 0 || mn == 1 || mn == 5 || mn == 10 || mn == 15 || mn == 30 || mn == 60);
+  int mn = server.arg(F("min")).toInt();
+  bool valido = server.hasArg(F("min")) && (mn == 0 || mn == 1 || mn == 5 || mn == 10 || mn == 15 || mn == 30 || mn == 60);
   if (!valido) { redirecionaConfig("tempoligada_erro"); return; }
   telaTimeoutMin = mn;
   if (displayLigado && !telaAcordadaNoite) armaTimerTela(telaDuracaoPadraoMs());   // passa a contar a partir de agora
@@ -3948,7 +4131,7 @@ void handleTempoLigada() {
 void handleTempoTela() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  int seg = server.arg("seg").toInt();
+  int seg = server.arg(F("seg")).toInt();
   if (seg < 5 || seg > 30 || seg % 5 != 0) { redirecionaConfig("tempo_erro"); return; }
   telaSeg = seg;
   ui.setTimePerFrame((uint16_t)(telaSeg * 1000));
@@ -3963,8 +4146,8 @@ void handleTempoTela() {
 void handleLed() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  ledStatusAtivo = server.hasArg("ativo");
-  ledSegueAgenda = server.hasArg("agenda");
+  ledStatusAtivo = server.hasArg(F("ativo"));
+  ledSegueAgenda = server.hasArg(F("agenda"));
   ledSilencio = ledSegueAgenda && agendaEstadoAtual() == 0;     // vale já, sem esperar o próximo ciclo do loop
   salvaConfig();
   redirecionaConfig("led");
@@ -3977,16 +4160,30 @@ void handleLed() {
 void handleBateria() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  bateriaAtiva = server.hasArg("ativa");
+  bateriaAtiva = server.hasArg(F("ativa"));
   if (bateriaAtiva) {
     bateriaV = 0;                        // recomeça a média
     atualizaBateria();
     nextBateria = millis() + 30000UL;
   }
-  energiaAtiva = server.hasArg("energia");
+  energiaAtiva = server.hasArg(F("energia"));
   if (energiaAtiva) energiaLeAgora();    // já mostra o estado atual da energia
   salvaConfig();
   redirecionaConfig("bat");
+}
+
+/**
+ * POST /economia: liga ou desliga a economia na bateria (light sleep do WiFi sem energia externa) e
+ * escolhe o intervalo do envio ao painel na bateria. Vale na hora.
+ */
+void handleEconomia() {
+  if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
+  if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
+  ecoBateria = server.hasArg(F("eco"));
+  int m = server.arg(F("int")).toInt();
+  if (ecoIntervaloValido(m)) ecoIntervaloMin = m;
+  salvaConfig();
+  redirecionaConfig("eco");
 }
 
 /**
@@ -3996,13 +4193,13 @@ void handleBateria() {
 void handleBrilho() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  int dia = server.arg("dia").toInt();
-  int noite = server.arg("noite").toInt();
+  int dia = server.arg(F("dia")).toInt();
+  int noite = server.arg(F("noite")).toInt();
   if (!brilhoValido(dia) || !brilhoValido(noite)) { redirecionaConfig("brilho_erro"); return; }
   brilhoPct = dia;
   brilhoNoitePct = noite;
-  noiteDiminui = (server.arg("modo") == "1");
-  noitePeloSol = (server.arg("fonte") == "1");
+  noiteDiminui = (server.arg(F("modo")) == "1");
+  noitePeloSol = (server.arg(F("fonte")) == "1");
   salvaConfig();
   if (agendaEstadoAtual() == 0) {       // no horário de tela desligada, reavalia a agenda já: apaga ou mantém conforme o novo modo
     agendaUltimoEstado = -1;
@@ -4016,15 +4213,15 @@ void handleBrilho() {
 void handleHora() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  if (!server.hasArg("fuso")) { redirecionaConfig("fuso"); return; }
-  int fuso = server.arg("fuso").toInt();
+  if (!server.hasArg(F("fuso"))) { redirecionaConfig("fuso"); return; }
+  int fuso = server.arg(F("fuso")).toInt();
   bool okFuso = false;
   for (uint8_t k = 0; k < FUSO_COUNT; k++) {
     if (FUSOS[k].min == fuso) okFuso = true;
   }
   if (!okFuso) { redirecionaConfig("fuso"); return; }
   fusoMin = fuso;
-  horarioVerao = server.hasArg("verao");
+  horarioVerao = server.hasArg(F("verao"));
   aplicaFuso();                         // reinicia o NTP com o novo fuso
   agendaUltimoEstado = -1;              // a agenda da tela reavalia com a nova hora
   salvaConfig();
@@ -4037,7 +4234,7 @@ void handleTelas() {
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
   uint8_t mask = 0;
   for (uint8_t k = 0; k < TELAS_TOTAL; k++) {
-    if (server.hasArg("t" + String(k))) mask |= (1 << k);
+    if (server.hasArg(F("t") + String(k))) mask |= (1 << k);
   }
   if (mask == 0) { redirecionaConfig("telas_erro"); return; }
   telasMask = mask;
@@ -4050,9 +4247,9 @@ void handleTelas() {
 void handleAgenda() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  bool ativa = server.hasArg("ativa");
-  int liga = parseHora(server.arg("liga"));
-  int desliga = parseHora(server.arg("desliga"));
+  bool ativa = server.hasArg(F("ativa"));
+  int liga = parseHora(server.arg(F("liga")));
+  int desliga = parseHora(server.arg(F("desliga")));
   if (liga < 0 || desliga < 0) { redirecionaConfig("hora"); return; }
   if (ativa && liga == desliga) { redirecionaConfig("horaigual"); return; }
 
@@ -4068,16 +4265,16 @@ void handleAgenda() {
 /** POST /display: liga/apaga a tela (estado = 1, 0 ou t para alternar). */
 void handleDisplay() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
-  String v = server.arg("estado");
-  if (v == "1") displayLigado = true;
-  else if (v == "0") displayLigado = false;
+  String v = server.arg(F("estado"));
+  if (v.equals(F("1"))) displayLigado = true;
+  else if (v.equals(F("0"))) displayLigado = false;
   else displayLigado = !displayLigado;
   aplicaDisplay();
   telaAcordadaNoite = false;
   if (displayLigado) armaTimerTela(telaDuracaoPadraoMs());
   else telaContando = false;
   salvaConfig();
-  if (server.hasArg("volta")) {
+  if (server.hasArg(F("volta"))) {
     redirecionaConfig("disp");
   } else {
     server.send(200, "application/json", displayLigado ? "{\"display\":true}" : "{\"display\":false}");
@@ -4088,7 +4285,7 @@ void handleDisplay() {
 void handleResetWiFi() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  server.send(200, "text/html", "<meta charset=\"utf-8\"><p>Dados de WiFi apagados. Reiniciando...</p>");
+  server.send(200, "text/html", PSTR("<meta charset=\"utf-8\"><p>Dados de WiFi apagados. Reiniciando...</p>"));
   delay(500);
   wifiManager.resetSettings();
   ESP.restart();
@@ -4101,7 +4298,7 @@ void handleResetWiFi() {
 void handleResetGeral() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  server.send(200, "text/html", "<meta charset=\"utf-8\"><p>Reset geral feito. Reiniciando... Conecte-se à rede " PORTAL_SSID " para configurar de novo.</p>");
+  server.send(200, "text/html", PSTR("<meta charset=\"utf-8\"><p>Reset geral feito. Reiniciando... Conecte-se à rede " PORTAL_SSID " para configurar de novo.</p>"));
   delay(500);
   limpaConfig();
   wifiManager.resetSettings();
@@ -4115,7 +4312,7 @@ void handleResetGeral() {
 void handlePortal() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
-  server.send(200, "text/html", "<meta charset=\"utf-8\"><p>Conecte-se à rede " PORTAL_SSID " para configurar. A estação reinicia ao terminar.</p>");
+  server.send(200, "text/html", PSTR("<meta charset=\"utf-8\"><p>Conecte-se à rede " PORTAL_SSID " para configurar. A estação reinicia ao terminar.</p>"));
   delay(500);
   server.stop();                        // o portal usa a porta 80
   wifiManager.setConfigPortalTimeout(180);

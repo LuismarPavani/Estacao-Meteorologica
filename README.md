@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-3.3-success)
+![Versão](https://img.shields.io/badge/firmware-3.4-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -397,6 +397,17 @@ O percentual é uma **estimativa pela tensão**: cai sob carga e varia com a tem
 
 > Com o OLED aceso e o WiFi sempre ligado, o ESP8266 consome algo como 80 a 150 mA. Uma 18650 dura em torno de um dia. Para longa duração seria necessário *deep sleep*, o que desliga a página web e o display.
 
+### Economia na bateria
+
+Em **`/config` → Bateria e energia → Economia na bateria** (precisa da **placa UPS** ativa, que informa quando falta energia externa):
+
+- **Sem energia externa**, o WiFi entra em ***light sleep***: dorme entre os sinais do roteador e continua conectado. O consumo do ESP cai de ~15–20 mA para ~1–3 mA em repouso (valores típicos; o regulador e o chip USB da placa e o OLED aceso gastam à parte).
+- **Envio ao painel** na bateria a cada 15, 20, **30**, 45 ou 60 min (escolhido na mesma seção).
+- **Abrir a página ou apertar um botão** deixa o ESP acordado por `ECO_ACORDADO_MS` (2 min): só o primeiro acesso demora até ~0,3 s a mais. O envio ao painel, a consulta do clima e o **OTA** também rodam sem o sono.
+- **Na tomada nada muda**: o WiFi volta na hora ao modo normal (*modem sleep*).
+
+Com a tela apagada e o ESP dormindo, o `loop()` faz pausas de `ECO_LOOP_MS` (100 ms); um toque muito rápido no botão pode precisar ser um pouco mais longo. Os padrões ficam no `WeatherStationConfig.h` (`ECO_BATERIA_PADRAO`, `ECO_INTERVALO_PADRAO`, `ECO_ACORDADO_MS`, `ECO_LOOP_MS`).
+
 ---
 
 ## 💡 LED de status
@@ -481,7 +492,7 @@ O horário **não vai no corpo**: o servidor deve registrar a hora em que recebe
 curl -X POST "https://SEU-APP.vercel.app/api/readings" \
   -H "Content-Type: application/json" \
   -H "x-device-key: SUA_DEVICE_KEY" \
-  -d '{"device_id":"esp8266-sala","temperature":24.5,"humidity":61.3,"city_id":3448439,"city_name":"São Paulo","ip":"192.168.0.50","rssi":-62,"firmware":"3.3","battery_active":true,"battery":83,"battery_voltage":4.02,"external_power":false,"sensor_ok":true,"uptime_s":86400,"reset_reason":"Power on","free_heap":24120,"chip_id":"A1B2C3","send_interval_s":900,"display_on":true,"rssi_pct":76,"lat":-23.5475,"lon":-46.6361}'
+  -d '{"device_id":"esp8266-sala","temperature":24.5,"humidity":61.3,"city_id":3448439,"city_name":"São Paulo","ip":"192.168.0.50","rssi":-62,"firmware":"3.4","battery_active":true,"battery":83,"battery_voltage":4.02,"external_power":false,"sensor_ok":true,"uptime_s":86400,"reset_reason":"Power on","free_heap":24120,"chip_id":"A1B2C3","send_interval_s":900,"display_on":true,"rssi_pct":76,"lat":-23.5475,"lon":-46.6361}'
 ```
 
 > O ESP usa **HTTPS sem validar o certificado** (`setInsecure()`), com buffer de 1024 bytes (`API_TLS_RX_BUF`). Se a conexão falhar por falta de memória, aumente esse valor ou veja a seção **Sistema**.
@@ -511,6 +522,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | POST | `/brilho` | Salva o brilho de dia (`dia`), o brilho noturno (`noite`), ambos de 5 a 100 de 5 em 5, e o modo noturno (`modo`: `0` = apagar a tela, `1` = manter acesa com o brilho noturno), e o que é a noite (`fonte`: `0` = horário automático, `1` = do pôr ao nascer do sol) |
 | POST | `/telas` | Salva as telas do OLED que aparecem (caixas `t0` a `t6`, na ordem das telas; pelo menos uma) |
 | POST | `/bateria` | Ativa/desativa a bateria |
+| POST | `/economia` | Liga/desliga a economia na bateria (`eco`) e o intervalo de envio na bateria (`int`: 15, 20, 30, 45 ou 60 min) |
 | POST | `/api` | Salva ID, URL e `DEVICE_KEY` do painel |
 | POST | `/enviar` | Envia uma leitura agora |
 | POST | `/portal` | Abre o portal de configuração de WiFi |
@@ -709,7 +721,8 @@ WeatherStation/
 | **3.0** | LED azul configurável em `/config` → Tela: ligar/desligar e seguir o horário automático da tela (apagado à noite) |
 | **3.1** | **Brilho do OLED** em `/config` → Display (5% a 100%) com **brilho noturno** (apagar ou manter acesa à noite; acender à noite usa o brilho noturno) e ícone de brilho na página principal; senhas, placa e configurações movidas para o **`WeatherStationConfig.h`** (com modelo `.example.h`); **portal de WiFi com senha**; **proteção contra CSRF** nos `POST`; **boot sem roteador** sem reiniciar em loop (segue sem WiFi e reconecta sozinho); nome do sensor e do pino nas mensagens conforme `DHTTYPE`/`DHTPIN`; nome na rede passa a ser `WeatherStationESP8266-<chip>`; **tela de abertura** com logo, nome e versão; **tela do envio pelo botão** com ícones, etapas, barra de progresso, código HTTP e tempo; **senha na `/config`** com login lembrado por 30 dias (cookie), botões "Sair" e "Desconectar todos os navegadores"; o OLED mostra `--` (em vez de 0°C e 01/01/1970) até chegar o clima e a hora da internet, e mantém os últimos dados bons se uma consulta falhar |
 | **3.2** | **Escolha das telas** do OLED em `/config` → Display; **indicadores compactos** na barra inferior; nova tela **Sol e Lua** (nascer/pôr do sol e da Lua, fase e iluminação, calculados no ESP); tela 4 vira **Próximas 24 h** (mínima/máxima reais, chuva e sensação térmica, com cartões na página); clima consultado pelas **coordenadas da cidade**; **brilho noturno pelo pôr do sol** (opcional); tela **WIFI CONECTADO** com o IP e animação ao conectar; **3 servidores NTP**; cidade por **busca pelo nome** ou por **latitude/longitude**, com o ID opcional |
-| **3.3** | **Nova `/config` no estilo dos Ajustes do iPhone**: menu com ícones e resumo de cada seção, páginas separadas (Cidade e clima, Display, Data e hora, Bateria e energia, Painel web, WiFi, LED de status, Sistema), cartões, chaves liga/desliga, listas que salvam ao tocar e itens que abrem na própria página; fuso com rota própria (`/hora`); páginas menores e estilo na flash (menos RAM); fundo das páginas do ESP igual ao do painel web; envio ao painel com **`lat` e `lon`** (22 campos), para o painel funcionar com cidade sem ID (requer painel com `migration-v5.sql`) |
+| **3.3** | **Nova `/config` no estilo dos Ajustes do iPhone**: menu com ícones e resumo de cada seção, páginas separadas (Cidade e clima, Display, Data e hora, Bateria e energia, Painel web, WiFi, LED de status, Sistema), cartões, chaves liga/desliga, listas que salvam ao tocar e itens que abrem na própria página; fuso com rota própria (`/hora`); páginas menores e estilo na flash (menos RAM); fundo das páginas do ESP igual ao do painel web; envio ao painel com **`lat` e `lon`** (22 campos), para o painel funcionar com cidade sem ID (requer painel com `migration-v5.sql`); textos fixos movidos para a flash (~1,8 KB a mais de RAM livre) |
+| **3.4** | **Economia na bateria** em `/config` → Bateria e energia: sem energia externa (placa UPS), o WiFi entra em *light sleep* e fica acordado por 2 min após um acesso à página ou um clique; envio ao painel com intervalo próprio na bateria (15 a 60 min); envio, clima e OTA sem o sono; rota `/economia`; tela do envio pelo botão mostra "Conexão segura" (o texto antigo era cortado) |
 
 ---
 
