@@ -2754,17 +2754,24 @@ void iniciaOta() {
 
 /** Chamada pelo WiFiManager ao abrir o portal de configuração: mostra no OLED como se conectar. */
 void configModeCallback(WiFiManager *myWiFiManager) {
-  Serial.println(F("Entered config mode"));
-  ligaTela();                  // mostra as instruções do portal mesmo com a tela apagada
+  Serial.println(F("Portal de configuração do WiFi aberto"));
   Serial.println(WiFi.softAPIP());
   Serial.println(myWiFiManager->getConfigPortalSSID());
+  ligaTela();                             // mostra as instruções mesmo com a tela apagada
+
+  // Rede, senha (PORTAL_SENHA) e endereço do portal. A senha aparece porque o portal só abre
+  // sem WiFi, e quem lê o OLED está ao lado da estação.
+  String senha = F("Senha: ");
+  senha += PORTAL_SENHA;
   display.clear();
   display.setTextAlignment(TEXT_ALIGN_CENTER);
   display.setFont(ArialMT_Plain_10);
-  display.drawString(64, 10, F("Wifi Manager"));
-  display.drawString(64, 20, F("Conecte ao AP"));
-  display.drawString(64, 30, myWiFiManager->getConfigPortalSSID());
-  display.drawString(64, 40, F("Para configurar o Wifi"));
+  display.drawString(64, 0, F("CONFIGURAR O WIFI"));
+  display.drawString(64, 12, F("Conecte-se à rede:"));
+  display.drawString(64, 24, myWiFiManager->getConfigPortalSSID());
+  if (display.getStringWidth(senha) <= 128) display.drawString(64, 36, senha);
+  else display.drawString(64, 36, String(PORTAL_SENHA));   // senha longa: sem o "Senha:" na frente
+  display.drawString(64, 50, F("e abra ") + WiFi.softAPIP().toString());
   display.display();
 }
 
