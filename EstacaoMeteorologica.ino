@@ -205,6 +205,33 @@ class BuscaCidade : public JsonListener {
     bool emNomesLocais = false;
 };
 
+// Leitor do arquivo de backup da /config (JSON de um nível só: {"formato":1,"brilho":80,...}).
+// Guarda os pares chave/valor do primeiro nível; objetos e listas internos são ignorados.
+class LeitorBackup : public JsonListener {
+  public:
+    static const uint8_t MAX = 40;      // o backup tem ~32 campos; sobra para versões futuras
+    String k[MAX];
+    String v[MAX];
+    uint8_t n = 0;
+    void whitespace(char c) override {}
+    void startDocument() override {}
+    void endDocument() override {}
+    void startArray() override { nivel++; }
+    void endArray() override { nivel--; }
+    void startObject() override { nivel++; }
+    void endObject() override { nivel--; }
+    void key(String s) override { chave = s; }
+    void value(String s) override { if (nivel == 1 && n < MAX) { k[n] = chave; v[n] = s; n++; } }
+    /** Índice da chave no arquivo, ou -1 se ela não veio. */
+    int busca(const __FlashStringHelper* nome) const {   // nome na flash: F("brilho")
+      for (uint8_t i = 0; i < n; i++) if (strcmp_P(k[i].c_str(), (PGM_P)nome) == 0) return i;
+      return -1;
+    }
+  private:
+    String chave = "";
+    int nivel = 0;
+};
+
 // Opção da lista de fusos horários (minutos em relação ao UTC e nome)
 struct Fuso { int16_t min; const char* nome; };
 
@@ -566,6 +593,9 @@ void handleResetWiFi();
 void handleResetGeral();
 void handleReiniciar();
 void handlePortal();
+String backupJson();
+void handleExportar();
+void handleImportar();
 
 // ==========================================================================================
 //  7. TABELAS
@@ -1155,6 +1185,8 @@ void setup() {
   server.on(F("/reset-geral"), HTTP_POST, handleResetGeral);
   server.on(F("/reiniciar"), HTTP_POST, handleReiniciar);
   server.on(F("/portal"), HTTP_POST, handlePortal);
+  server.on(F("/exportar"), HTTP_GET, handleExportar);
+  server.on(F("/importar"), HTTP_POST, handleImportar);
   server.on(F("/login"), HTTP_GET, paginaLogin);
   server.on(F("/login"), HTTP_POST, handleLogin);
   server.on(F("/sair"), HTTP_POST, handleSair);
@@ -3852,6 +3884,25 @@ void cfgSistema(const String& r) {
          "<div class=\"note\" style=\"margin-top:-8px\">Cada navegador fica conectado por ") + String(LOGIN_DIAS) + F(" dias. "
          "Use se perdeu um celular ou entrou num computador de outra pessoa.</div>");
   }
+  if (h.length()) server.sendContent(h);   // vazio encerraria a resposta (chunked)
+  // Backup: exportar baixa o JSON; importar lê o arquivo no navegador, confere e envia no campo 'cfg'
+  static const char BACKUP_HTML[] PROGMEM =
+    "<div class=\"cap\">Backup das configurações</div>"
+    "<form method=\"GET\" action=\"/exportar\"><button class=\"btn sec\" type=\"submit\">Exportar configurações</button></form>"
+    "<form method=\"POST\" action=\"/importar\" id=\"fimp\"><input type=\"hidden\" name=\"cfg\" id=\"cfg\">"
+    "<input type=\"file\" id=\"arq\" accept=\".json,application/json\" style=\"display:none\" onchange=\"importa(this)\">"
+    "<button class=\"btn sec\" type=\"button\" onclick=\"document.getElementById('arq').click()\">Importar configurações</button></form>"
+    "<div class=\"note\" style=\"margin-top:-8px\">O arquivo leva todos os ajustes, inclusive a chave do OpenWeatherMap e a DEVICE_KEY: "
+    "guarde-o com cuidado. Não leva o WiFi, as senhas do EstacaoConfig.h nem o ID do dispositivo. Ao importar, este ESP mantém o ID dele "
+    "e reinicia.</div>"
+    "<script>function importa(i){var f=i.files[0];i.value='';if(!f)return;"
+    "if(f.size>4096){alert('Arquivo grande demais para um backup da estação.');return;}"
+    "var r=new FileReader();r.onload=function(){var j;try{j=JSON.parse(r.result)}catch(e){alert('Arquivo inválido: não é um JSON.');return;}"
+    "if(!j||j.formato!==1){alert('Este arquivo não é um backup da estação.');return;}"
+    "if(confirm('Importar as configurações do ESP '+(j.chip||'?')+' (firmware '+(j.firmware||'?')+')? Este ESP mantém o ID dele e reinicia.')){"
+    "document.getElementById('cfg').value=r.result;document.getElementById('fimp').submit();}};r.readAsText(f);}</script>";
+  server.sendContent_P(BACKUP_HTML);
+  h = F("");
   h += F("<div class=\"cap\">Reiniciar</div>"
        "<form method=\"POST\" action=\"/reiniciar\" onsubmit=\"return confirm('Reiniciar o ESP agora?')\">"
        "<button class=\"btn sec\" type=\"submit\">Reiniciar o ESP</button></form>"
@@ -4342,5 +4393,238 @@ void handlePortal() {
   server.stop();                        // o portal usa a porta 80
   wifiManager.setConfigPortalTimeout(180);
   wifiManager.startConfigPortal(PORTAL_SSID, PORTAL_SENHA);
+  ESP.restart();
+}
+
+// ---- BACKUP DAS CONFIGURAÇÕES (exportar e importar) -----------------------------------------
+
+/**
+ * Monta o arquivo de backup: todos os ajustes da /config, inclusive a chave do OpenWeatherMap e a
+ * DEVICE_KEY, menos o ID do dispositivo (cada ESP tem o seu). JSON de um nível só, com nomes em
+ * português, para ser lido por este firmware e pelos próximos (o porte para ESP32 inclusive).
+ * Não entram o WiFi (fica com o WiFiManager), as senhas do EstacaoConfig.h nem o sal do login.
+ */
+String backupJson() {
+  String j;
+  j.reserve(1100);
+  auto txt = [&](const __FlashStringHelper* nome, const String& v) { j += F(",\""); j += nome; j += F("\":\""); j += jsonEscape(v); j += '"'; };
+  auto num = [&](const __FlashStringHelper* nome, long v) { j += F(",\""); j += nome; j += F("\":"); j += String(v); };
+  auto sim = [&](const __FlashStringHelper* nome, bool v) { j += F(",\""); j += nome; j += F("\":"); j += v ? F("true") : F("false"); };
+  j = F("{\"formato\":1,\"firmware\":\"" FIRMWARE_VERSAO "\"");
+  txt(F("chip"), String(ESP.getChipId(), HEX));
+  // Cidade e clima
+  txt(F("owmChave"), OPEN_WEATHER_MAP_APP_ID);
+  txt(F("cidadeId"), OPEN_WEATHER_MAP_LOCATION_ID);
+  if (coordOk) { j += F(",\"lat\":"); j += String(cidadeLat, 5); j += F(",\"lon\":"); j += String(cidadeLon, 5); }
+  txt(F("idioma"), OPEN_WEATHER_MAP_LANGUAGE);
+  // Data e hora
+  num(F("fuso"), fusoMin);
+  sim(F("verao"), horarioVerao);
+  // Display
+  sim(F("telaLigada"), displayLigado);
+  num(F("telas"), telasMask);
+  num(F("telaSeg"), telaSeg);
+  num(F("telaMin"), telaTimeoutMin);
+  num(F("brilho"), brilhoPct);
+  num(F("brilhoNoite"), brilhoNoitePct);
+  sim(F("noiteDiminui"), noiteDiminui);
+  sim(F("noitePeloSol"), noitePeloSol);
+  sim(F("agenda"), agendaAtiva);
+  txt(F("agendaLiga"), formataHora(agendaLiga));
+  txt(F("agendaDesliga"), formataHora(agendaDesliga));
+  // Bateria e energia
+  sim(F("bateria"), bateriaAtiva);
+  sim(F("energia"), energiaAtiva);
+  sim(F("eco"), ecoBateria);
+  num(F("ecoIntervalo"), ecoIntervaloMin);
+  // LED de status
+  sim(F("led"), ledStatusAtivo);
+  sim(F("ledAgenda"), ledSegueAgenda);
+  // Painel web (o ID do dispositivo fica de fora de propósito)
+  txt(F("painelUrl"), apiUrl);
+  txt(F("painelChave"), deviceKey);
+  j += '}';
+  return j;
+}
+
+/** GET /exportar: baixa o arquivo de backup (estacao-<chip>.json). Precisa estar logado (tem chaves). */
+void handleExportar() {
+  if (!exigeLogin()) return;            // sem login: vai para /login
+  String nome = F("estacao-") + String(ESP.getChipId(), HEX) + F(".json");
+  server.sendHeader(F("Content-Disposition"), F("attachment; filename=\"") + nome + F("\""));
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.send(200, "application/json", backupJson());
+}
+
+/** true para true/1, false para false/0; devolve false se o texto não é nenhum dos dois. */
+bool leSimNao(const String& s, bool& out) {
+  if (s.equals(F("true")) || s.equals(F("1"))) { out = true; return true; }
+  if (s.equals(F("false")) || s.equals(F("0"))) { out = false; return true; }
+  return false;
+}
+
+/** Número inteiro (com sinal opcional) em 'out'; false se o texto não é um inteiro. */
+bool leInteiro(const String& s, long& out) {
+  if (s.length() == 0 || s.length() > 7) return false;
+  for (size_t k = 0; k < s.length(); k++) {
+    if (!(isDigit(s[k]) || (k == 0 && s[k] == '-'))) return false;
+  }
+  out = s.toInt();
+  return true;
+}
+
+/**
+ * POST /importar: recebe o arquivo de backup (campo 'cfg', lido pelo navegador) e aplica cada ajuste
+ * com as mesmas regras da /config. Campo ausente = mantém o atual; inválido = ignorado (e listado na
+ * resposta). O ID do dispositivo nunca é importado: este ESP mantém o dele (ou o padrão esp8266-<chip>).
+ * Chaves em branco no arquivo também mantêm as atuais. No fim, grava tudo e reinicia.
+ */
+void handleImportar() {
+  if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
+  if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
+
+  LeitorBackup* b = new LeitorBackup();  // ~1 KB: no heap, não na pilha
+  {
+    String corpo = server.arg(F("cfg"));
+    JsonStreamingParser parser;
+    parser.setListener(b);
+    for (size_t k = 0; k < corpo.length(); k++) parser.parse(corpo[k]);
+  }
+
+  int fi = b->busca(F("formato"));
+  if (fi < 0 || b->v[fi].toInt() != 1) {
+    delete b;
+    server.send_P(400, PSTR("text/html; charset=utf-8"),
+                PSTR("<meta charset=\"utf-8\"><body style=\"font-family:system-ui,sans-serif;background:#07101e;color:#fff;padding:24px\">"
+                "<p>⚠️ Arquivo inválido: não é um backup da estação (ou é de uma versão mais nova). Nada foi alterado.</p>"
+                "<p><a style=\"color:#81d4fa\" href=\"/config?s=sistema\">‹ Voltar</a></p></body>"));
+    return;
+  }
+
+  uint8_t aplicados = 0;
+  String ignorados = "";
+  String s;
+  bool sn;
+  long n;
+  auto pega = [&](const __FlashStringHelper* nome) -> bool { int i = b->busca(nome); if (i < 0) return false; s = b->v[i]; s.trim(); return true; };
+  auto ignora = [&](const __FlashStringHelper* nome) { if (ignorados.length()) ignorados += F(", "); ignorados += nome; };
+  // Liga/desliga: aplica se veio true/false
+  auto simNao = [&](const __FlashStringHelper* nome, bool& var) {
+    if (!pega(nome)) return;
+    if (leSimNao(s, sn)) { var = sn; aplicados++; } else ignora(nome);
+  };
+
+  // Chave do OpenWeatherMap (em branco = mantém a atual)
+  if (pega(F("owmChave")) && s.length()) {
+    bool ok = s.length() >= 20 && s.length() <= 40;
+    for (size_t k = 0; k < s.length(); k++) if (!isAlphaNumeric(s[k])) ok = false;
+    if (ok) { OPEN_WEATHER_MAP_APP_ID = s; aplicados++; } else ignora(F("owmChave"));
+  }
+
+  // Cidade: ID e/ou coordenadas, com as regras da /config (precisa de um dos dois)
+  bool temId = pega(F("cidadeId"));
+  String id = temId ? s : String("");
+  String latS = pega(F("lat")) ? s : String("");
+  String lonS = pega(F("lon")) ? s : String("");
+  if (temId || latS.length() || lonS.length()) {
+    bool idOk = id.length() <= 10;
+    for (size_t k = 0; k < id.length(); k++) if (!isDigit(id[k])) idOk = false;
+    float lat = 0, lon = 0;
+    int8_t okLat = parseCoord(latS, lat, -90, 90);
+    int8_t okLon = parseCoord(lonS, lon, -180, 180);
+    bool coordValida = okLat == 1 && okLon == 1;
+    bool coordErrada = okLat < 0 || okLon < 0 || (okLat == 0) != (okLon == 0);
+    if (!idOk || coordErrada || (id.length() == 0 && !coordValida)) ignora(F("cidade"));
+    else {
+      OPEN_WEATHER_MAP_LOCATION_ID = id;
+      coordOk = coordValida;             // sem coordenadas: o ESP descobre pelo ID na 1ª consulta
+      if (coordValida) { cidadeLat = lat; cidadeLon = lon; }
+      aplicados++;
+    }
+  }
+
+  if (pega(F("idioma"))) {
+    bool ok = false;
+    for (uint8_t k = 0; k < LANG_COUNT; k++) if (s.equals(LANG_CODES[k])) ok = true;
+    if (ok) { OPEN_WEATHER_MAP_LANGUAGE = s; aplicados++; } else ignora(F("idioma"));
+  }
+
+  // Data e hora
+  if (pega(F("fuso"))) {
+    bool ok = false;
+    if (leInteiro(s, n)) for (uint8_t k = 0; k < FUSO_COUNT; k++) if (FUSOS[k].min == n) ok = true;
+    if (ok) { fusoMin = n; aplicados++; } else ignora(F("fuso"));
+  }
+  simNao(F("verao"), horarioVerao);
+
+  // Display
+  simNao(F("telaLigada"), displayLigado);
+  if (pega(F("telas"))) {
+    if (leInteiro(s, n) && n >= 1 && n <= 0x7F) { telasMask = n; aplicados++; } else ignora(F("telas"));
+  }
+  if (pega(F("telaSeg"))) {
+    if (leInteiro(s, n) && n >= 5 && n <= 30 && n % 5 == 0) { telaSeg = n; aplicados++; } else ignora(F("telaSeg"));
+  }
+  if (pega(F("telaMin"))) {
+    if (leInteiro(s, n) && (n == 0 || n == 1 || n == 5 || n == 10 || n == 15 || n == 30 || n == 60)) { telaTimeoutMin = n; aplicados++; }
+    else ignora(F("telaMin"));
+  }
+  if (pega(F("brilho"))) {
+    if (leInteiro(s, n) && brilhoValido(n)) { brilhoPct = n; aplicados++; } else ignora(F("brilho"));
+  }
+  if (pega(F("brilhoNoite"))) {
+    if (leInteiro(s, n) && brilhoValido(n)) { brilhoNoitePct = n; aplicados++; } else ignora(F("brilhoNoite"));
+  }
+  simNao(F("noiteDiminui"), noiteDiminui);
+  simNao(F("noitePeloSol"), noitePeloSol);
+  simNao(F("agenda"), agendaAtiva);
+  bool temLiga = pega(F("agendaLiga"));
+  int liga = temLiga ? parseHora(s) : -1;
+  bool temDesliga = pega(F("agendaDesliga"));
+  int desliga = temDesliga ? parseHora(s) : -1;
+  if (temLiga || temDesliga) {
+    if (liga >= 0 && desliga >= 0 && !(agendaAtiva && liga == desliga)) { agendaLiga = liga; agendaDesliga = desliga; aplicados++; }
+    else ignora(F("agenda (horários)"));
+  }
+
+  // Bateria e energia
+  simNao(F("bateria"), bateriaAtiva);
+  simNao(F("energia"), energiaAtiva);
+  simNao(F("eco"), ecoBateria);
+  if (pega(F("ecoIntervalo"))) {
+    if (leInteiro(s, n) && ecoIntervaloValido(n)) { ecoIntervaloMin = n; aplicados++; } else ignora(F("ecoIntervalo"));
+  }
+
+  // LED de status
+  bool led = ledStatusAtivo;             // ledStatusAtivo é volatile (usado no Ticker): passa por uma cópia
+  simNao(F("led"), led);
+  ledStatusAtivo = led;
+  simNao(F("ledAgenda"), ledSegueAgenda);
+
+  // Painel web: URL em branco desliga o envio (como na /config); chave em branco mantém a atual
+  if (pega(F("painelUrl"))) {
+    bool ok = s.length() == 0 || ((s.startsWith("http://") || s.startsWith("https://")) && s.length() <= 120);
+    for (size_t k = 0; k < s.length(); k++) if (s[k] < 33 || s[k] > 126) ok = false;
+    if (ok) { apiUrl = s; aplicados++; } else ignora(F("painelUrl"));
+  }
+  if (pega(F("painelChave")) && s.length()) {
+    bool ok = s.length() >= 8 && s.length() <= 64;
+    for (size_t k = 0; k < s.length(); k++) { char c = s[k]; if (c < 33 || c > 126 || c == '"' || c == '\\') ok = false; }
+    if (ok) { deviceKey = s; aplicados++; } else ignora(F("painelChave"));
+  }
+  // ID do dispositivo: nunca vem do arquivo (apiDeviceId continua o deste ESP)
+  delete b;
+
+  salvaConfig();
+  String h;
+  h.reserve(700);
+  h = F("<meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"15;url=/config\">"
+        "<body style=\"font-family:system-ui,sans-serif;background:#07101e;color:#fff;padding:24px;line-height:1.5\">"
+        "<p>✅ Configurações importadas: ") + String(aplicados) + (aplicados == 1 ? F(" ajuste aplicado.") : F(" ajustes aplicados.")) + F("</p>");
+  if (ignorados.length()) h += F("<p>⚠️ Ignorados (valor inválido, o atual foi mantido): ") + htmlEsc(ignorados) + F("</p>");
+  h += F("<p>O ID do dispositivo deste ESP foi mantido. Reiniciando... A página volta sozinha em uns 15 s.</p></body>");
+  server.send(200, "text/html; charset=utf-8", h);
+  Serial.println(F("Backup importado: ") + String(aplicados) + F(" ajustes; ignorados: ") + ignorados);
+  delay(500);
   ESP.restart();
 }

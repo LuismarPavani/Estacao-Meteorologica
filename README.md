@@ -68,6 +68,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 - Dados do painel web: ID do dispositivo, URL da API e `DEVICE_KEY`.
 - Portal de configuração de WiFi (WiFiManager), protegido por senha.
 - Senhas, placa e padrões de fábrica num só arquivo, o `EstacaoConfig.h`.
+- **Backup das configurações**: exporta todos os ajustes da `/config` num arquivo JSON e importa em outro ESP (ou no mesmo, depois de um reset geral), mantendo o ID do dispositivo de cada um.
 
 **Conectividade e manutenção**
 - Atualização **OTA** protegida por senha.
@@ -354,7 +355,7 @@ A página segue o estilo dos **Ajustes do iPhone**. Ela abre num **menu** com um
 | **Painel web** | Último envio, envio automático, cidade enviada, **Enviar dados agora** e os dados do painel (ID do dispositivo, URL da API e `DEVICE_KEY`) |
 | **WiFi** | Dados da conexão com ícone de sinal, abrir o portal de configuração e apagar a rede salva |
 | **LED de status** | Piscar para indicar o estado e seguir o horário da tela |
-| **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), servidores NTP, coordenadas, chip, CPU, flash, programa, memória, firmware, versão do core, sensor, **Desconectar todos os navegadores** (login) e **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
+| **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), servidores NTP, coordenadas, chip, CPU, flash, programa, memória, firmware, versão do core, sensor, **Desconectar todos os navegadores** (login), **Exportar e Importar configurações** (backup), **Reiniciar o ESP** e **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
 
 Todas as páginas pedem login (`CONFIG_SENHA`). O botão **Sair** fica no fim do menu.
 
@@ -371,6 +372,26 @@ Em "O brilho noturno vale" você escolhe o que é a noite:
 O controlador do OLED tem uma faixa de brilho limitada: mesmo em 5% a tela continua legível, mas a diferença para 100% é clara num ambiente escuro.
 
 **Agenda da tela:** o botão manual vale até o próximo horário programado. A agenda depende da hora da internet (NTP), então só age depois de sincronizar.
+
+### Backup das configurações
+
+Em `/config` → Sistema → **Backup das configurações**:
+
+- **Exportar configurações** baixa o arquivo `estacao-<chip>.json` com todos os ajustes: cidade (ID e coordenadas), chave do OpenWeatherMap, idioma, fuso e horário de verão, telas do OLED, tempo de cada tela, tempo de tela ligada, brilho e brilho noturno, agenda, bateria, sensor de energia, economia na bateria, LED de status, URL do painel e `DEVICE_KEY`.
+- **Importar configurações** abre a escolha do arquivo. O navegador confere se é um backup da estação e pede confirmação; o ESP aplica cada campo com as mesmas regras da `/config`, grava, mostra quantos ajustes aplicou (e quais ignorou, se algum valor estiver fora da faixa) e reinicia.
+- **ID do dispositivo:** nunca vai no arquivo. Ao importar, cada ESP mantém o ID dele (o salvo em Painel web ou o padrão `esp8266-<chip>`), para o painel não misturar as leituras de dois ESPs.
+- **O que fica de fora:** o WiFi (fica com o WiFiManager), as senhas do `EstacaoConfig.h` e o login dos navegadores.
+- **Campos ausentes** no arquivo, e chaves em branco, mantêm o valor atual do ESP. Uma URL do painel em branco desliga o envio, como na `/config`.
+
+O arquivo é um JSON simples, de um nível, que pode ser lido e editado num editor de texto:
+
+```json
+{"formato":1,"firmware":"3.6","chip":"a1b2c3","owmChave":"...","cidadeId":"3463011","lat":-20.53860,"lon":-47.40080,
+ "idioma":"pt_br","fuso":-180,"verao":false,"telaLigada":true,"telas":127,"telaSeg":10,"telaMin":0,"brilho":80,
+ "brilhoNoite":20,"noiteDiminui":true,"noitePeloSol":false,"agenda":true,"agendaLiga":"07:00","agendaDesliga":"23:00",
+ "bateria":true,"energia":true,"eco":true,"ecoIntervalo":30,"led":true,"ledAgenda":true,
+ "painelUrl":"https://SEU-APP.vercel.app/api/readings","painelChave":"..."}
+```
 
 ---
 
@@ -528,6 +549,8 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | POST | `/portal` | Abre o portal de configuração de WiFi |
 | POST | `/reset-wifi` | Apaga a rede WiFi salva e reinicia |
 | POST | `/reiniciar` | Só reinicia o ESP (WiFi e ajustes continuam salvos); a página volta para Sistema em 15 s |
+| GET | `/exportar` | Baixa o backup das configurações (`estacao-<chip>.json`), com as chaves e sem o ID do dispositivo. Precisa de login |
+| POST | `/importar` | Aplica um backup (campo `cfg` com o JSON), mantém o ID do dispositivo, grava e reinicia. Precisa de login |
 | POST | `/reset-geral` | Apaga o WiFi e todos os ajustes salvos e reinicia |
 
 **Exemplo de `/json`**
@@ -647,6 +670,7 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
   - **Como funciona:** o cookie guarda um SHA-256 da senha com um sal aleatório gravado na EEPROM; a senha em si nunca vai no cookie. O cookie é `HttpOnly` e `SameSite=Lax`.
   - **Limite:** o ESP só fala HTTP, então a senha e o cookie trafegam sem criptografia na rede local. Use o ESP em rede confiável e **não exponha a porta 80 à internet**.
   - **Esqueceu a senha?** Ela é a `CONFIG_SENHA` do `EstacaoConfig.h`. O reset geral não muda a senha. Para trocá-la, edite o arquivo e grave o firmware de novo.
+- **Arquivo de backup:** leva a chave do OpenWeatherMap e a `DEVICE_KEY` em texto. Guarde-o como uma senha e não o publique. Não leva o WiFi, as senhas do `EstacaoConfig.h` (OTA, portal e `/config`) nem o sal do login.
 - **Proteção contra CSRF:** todos os `POST` conferem os cabeçalhos `Origin`/`Referer` e `Host`. Assim, um site aberto no navegador não consegue apagar ajustes nem trocar a URL do painel para capturar a `DEVICE_KEY`, nem por DNS rebinding. O pedido só é aceito quando vem da página do próprio ESP, aberta pelo IP ou pelo nome dele na rede. Pedidos sem esses cabeçalhos (`curl`, scripts) passam por essa verificação, porque não vêm de um navegador, mas as ações protegidas ainda exigem o cookie de login.
 - **Chaves ficam gravadas em texto na flash** (chave do OpenWeatherMap, `DEVICE_KEY`, WiFi). Apagar a flash por completo as remove.
 - **HTTPS sem validação de certificado** (`setInsecure()`): protege contra espionagem simples, mas não contra um servidor falso.
@@ -684,6 +708,8 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 | **Esqueci a senha da `/config`** | Ela é a `CONFIG_SENHA` do `EstacaoConfig.h`. O reset geral não muda a senha. Sem o arquivo, defina uma senha nova nele e grave o firmware de novo (pela USB, ou por OTA se lembrar a `OTA_SENHA`) |
 | **"Muitas tentativas erradas"** | Após 5 senhas erradas seguidas, o login fica bloqueado por 1 minuto |
 | **Pede a senha de novo antes dos 30 dias** | Alguém usou "Desconectar todos os navegadores", a `CONFIG_SENHA` mudou, foi feito um reset geral, ou o navegador apagou os cookies (modo anônimo, limpeza de dados) |
+| **"Arquivo inválido: não é um backup da estação"** | O arquivo não é o JSON exportado pela estação, foi editado com erro ou é de uma versão mais nova do formato. Nada foi alterado |
+| **Importei e algum ajuste não mudou** | A resposta da importação lista os campos ignorados (valor fora da faixa); o ESP manteve o valor que já tinha. Campos que não vieram no arquivo e chaves em branco também mantêm o atual |
 | **Quero voltar ao padrão de fábrica** | Segure o botão de reset geral por 10 s, ou `/config` → Sistema → **Reset geral** (apaga o WiFi e todos os ajustes) |
 
 ---
@@ -725,6 +751,7 @@ EstacaoMeteorologica/
 | **3.3** | **Nova `/config` no estilo dos Ajustes do iPhone**: menu com ícones e resumo de cada seção, páginas separadas (Cidade e clima, Display, Data e hora, Bateria e energia, Painel web, WiFi, LED de status, Sistema), cartões, chaves liga/desliga, listas que salvam ao tocar e itens que abrem na própria página; fuso com rota própria (`/hora`); páginas menores e estilo na flash (menos RAM); fundo das páginas do ESP igual ao do painel web; envio ao painel com **`lat` e `lon`** (22 campos), para o painel funcionar com cidade sem ID (requer painel com `migration-v5.sql`); textos fixos movidos para a flash (~1,8 KB a mais de RAM livre) |
 | **3.4** | **Economia na bateria** em `/config` → Bateria e energia: sem energia externa (placa UPS), o WiFi entra em *light sleep* e fica acordado por 2 min após um acesso à página ou um clique; envio ao painel com intervalo próprio na bateria (15 a 60 min); envio, clima e OTA sem o sono; rota `/economia`; tela do envio pelo botão mostra "Conexão segura" (o texto antigo era cortado); botão **Reiniciar o ESP** em Sistema (rota `/reiniciar`) e o "‹ voltar" das seções como botão; nome "Estação Meteorológica" na abertura do OLED, no título da página e no rodapé da `/config` |
 | **3.5** | Nomes em português: arquivos `EstacaoConfig.h` (e `.example.h`), `EstacaoFontes.h` e `EstacaoImagens.h` (antes `WeatherStation*.h`); rede do portal de WiFi `EstacaoMeteorologica` (antes `ESP_WeatherStation`); nome na rede e na porta OTA `EstacaoMeteorologica-<chip>` (antes `WeatherStationESP8266-<chip>`); comentários traduzidos. O `device_id` continua `esp8266-<chip>`, para o painel manter o histórico |
+| **3.6** | **Backup das configurações** em `/config` → Sistema: **Exportar** baixa todos os ajustes num JSON (cidade, chave do OpenWeatherMap, idioma, fuso, telas, brilho, agenda, bateria, economia, LED, URL e `DEVICE_KEY` do painel); **Importar** confere o arquivo no navegador, aplica cada campo com as regras da `/config`, lista os ignorados, mantém o ID do dispositivo e reinicia. Rotas `/exportar` e `/importar` |
 
 ---
 
