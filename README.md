@@ -306,7 +306,7 @@ Fator total do divisor = (100k + 220k + 100k) / 100k = **4,2** (`BAT_FATOR`). Se
 Já fazem parte do pacote ESP8266: `ESP8266WiFi`, `ESP8266WebServer`, `ArduinoOTA`, `EEPROM`, `Ticker`, `ESP8266HTTPClient` e `WiFiClientSecure`.
 
 ### 3. Gravar
-1. Coloque `EstacaoMeteorologica.ino`, `EstacaoConfig.h`, `EstacaoFontes.h` e `EstacaoImagens.h` **na mesma pasta chamada `EstacaoMeteorologica`**. Se você baixou o projeto e não tem o `EstacaoConfig.h`, copie o `EstacaoConfig.example.h` com esse nome.
+1. Coloque **todos os `.ino`** (o `EstacaoMeteorologica.ino` e as abas `Backup`, `Clima`, `Config`, `Painel`, `Placa`, `Tela`, `Web`, `WebAcoes` e `WebConfig`), o `EstacaoConfig.h`, o `EstacaoFontes.h` e o `EstacaoImagens.h` **na mesma pasta chamada `EstacaoMeteorologica`**. A IDE abre as abas sozinha. Se você baixou o projeto e não tem o `EstacaoConfig.h`, copie o `EstacaoConfig.example.h` com esse nome.
 2. Abra o `EstacaoConfig.h` e troque as senhas (`OTA_SENHA`, `PORTAL_SENHA` e `CONFIG_SENHA`). Se precisar, escolha a placa na seção 2.
 3. Conecte o ESP por USB, escolha a porta e clique em **Carregar**.
 4. Nos envios seguintes, a placa também aparece como **porta de rede** (OTA). A IDE pede a senha `OTA_SENHA`.
@@ -529,6 +529,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | GET | `/` | Página principal |
 | GET | `/json` | Dados atuais (interno, externo, previsão, WiFi, bateria, estado da tela) |
 | GET | `/historico` | Histórico interno (arrays de temperatura e umidade) |
+| GET | `/sobre` | Página Sobre: versão, placa, sensor, resumo do projeto e links do GitHub e do painel (sem senha) |
 | GET | `/config` e `/config?s=clima\|display\|hora\|bateria\|painel\|wifi\|led\|sistema` | Menu das configurações e cada seção (pede login) |
 | GET | `/login` | Página de login da configuração |
 | POST | `/login` | Confere a senha (`senha`) e grava o cookie de login por `LOGIN_DIAS` dias |
@@ -591,7 +592,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 
 ## 🧩 Personalização no código
 
-Todas as senhas e constantes ajustáveis ficam no `EstacaoConfig.h`. O `EstacaoMeteorologica.ino` não precisa ser editado.
+Todas as senhas e constantes ajustáveis ficam no `EstacaoConfig.h`. Os `.ino` não precisam ser editados.
 
 | Constante | O que faz |
 |---|---|
@@ -640,7 +641,7 @@ O corpo do envio à API está todo na função `montaPayloadApi()`.
 
 ### Organização do arquivo e troca de placa
 
-O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as senhas e chaves, ficam no `EstacaoConfig.h`; o resto fica no `EstacaoMeteorologica.ino`. Todas as funções têm um comentário explicando o que fazem, e as variáveis são agrupadas por assunto.
+O firmware é dividido em seções numeradas e em abas. As seções 2 e 3, junto com as senhas e chaves, ficam no `EstacaoConfig.h`; as seções 1 e 4 a 8 ficam no `EstacaoMeteorologica.ino` (aba principal), e as outras funções ficam nas abas. A IDE do Arduino junta todas as abas à principal antes de compilar, por isso globais, tipos, tabelas e protótipos ficam na principal. Todas as funções têm um comentário explicando o que fazem, e as variáveis são agrupadas por assunto.
 
 | Seção | Conteúdo |
 |---|---|
@@ -652,7 +653,19 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 | 5. Objetos e variáveis de estado | Agrupados: clima, sensor, tela, agenda, bateria, API, LED, botões |
 | 6. Protótipos | Todas as funções declaradas, para a ordem não importar |
 | 7. Tabelas | Telas do OLED, idiomas, fusos, seções e estilo da `/config` e o HTML da página principal |
-| 8. Funções | Principal (`setup`/`loop`), configuração salva, LED, botões, sensores, bateria, clima, display, tela, WiFi, painel (API) e servidor web |
+| 8. Funções principais | `setup`, `loop` e as etapas do boot |
+
+| Aba | Conteúdo | No porte para ESP32 |
+|---|---|---|
+| `Config.ino` | Configuração salva (EEPROM) e fuso horário | Igual |
+| `Placa.ino` | LED, botões, sensor, bateria, energia externa, economia na bateria e WiFi | Reescrever boa parte |
+| `Clima.ino` | Clima do OpenWeatherMap e próximas 24 h | Igual |
+| `Tela.ino` | Display OLED: telas, ícones, brilho, tempo ligada e agenda | Trocar a aba inteira |
+| `Painel.ino` | Envio ao painel web (API REST) | Quase igual |
+| `Web.ino` | Servidor web: utilitários de texto, login da `/config` e página principal | Quase igual |
+| `WebConfig.ino` | Página `/config` (seções e tabelas) | Quase igual |
+| `WebAcoes.ino` | Busca de cidade (GET) e ações (POST) | Quase igual |
+| `Backup.ino` | Backup das configurações (exportar e importar) | Igual |
 
 **Trocar de placa** é só mudar uma linha na seção 2 do `EstacaoConfig.h`:
 
@@ -704,6 +717,7 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 | **Tela preta depois de conectar ao WiFi** | Falta a chave do OpenWeatherMap (placa nova ou depois de um reset geral). No boot o OLED mostra "Sem chave da API" com o endereço da `/config`; informe a chave na seção Cidade e clima |
 | **A tela apaga sozinha** | É o **tempo de tela ligada** (`/config` → Display). Aperte o botão das telas uma vez para acender; em "Apagar sozinha após", escolha "Nunca" para desativar |
 | **Erro "Escolha apenas UMA placa" ou "Nenhuma placa selecionada"** | Deixe sem comentário só uma das linhas `PLACA_...` na seção 2 do `EstacaoConfig.h` |
+| **Erro "redefinition of ..." ou "... was declared here" ao compilar a 3.7 ou mais nova** | Sobrou um `EstacaoMeteorologica.ino` antigo (com todas as funções) junto das abas, ou uma aba em dobro. Apague a pasta antiga e copie de novo todos os `.ino` |
 | **Erro "EstacaoConfig.h: No such file or directory"** | Copie o `EstacaoConfig.example.h` para `EstacaoConfig.h` na pasta do projeto e troque as senhas. Vindo da 3.4 ou anterior, renomeie o seu `WeatherStationConfig.h` para `EstacaoConfig.h` e apague os `WeatherStation*.h` antigos da pasta |
 | **Erro "PORTAL_SENHA precisa ter de 8 a 63 caracteres"** | A senha do portal no `EstacaoConfig.h` é curta ou longa demais para o WPA2 |
 | **Botão não responde** | Ligue entre o pino e o GND (D7 para as telas, D6 para o reset geral); confira `PIN_BOTAO_TELA` e `PIN_BOTAO_RESET`; cliques durante o envio à API ou a atualização do clima podem ser perdidos |
@@ -721,7 +735,16 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 
 ```
 EstacaoMeteorologica/
-├── EstacaoMeteorologica.ino    # firmware principal
+├── EstacaoMeteorologica.ino    # aba principal: bibliotecas, tipos, globais, tabelas, setup e loop
+├── Backup.ino            # aba: exportar e importar as configurações
+├── Clima.ino             # aba: clima do OpenWeatherMap
+├── Config.ino            # aba: configuração salva (EEPROM) e fuso
+├── Painel.ino            # aba: envio ao painel web
+├── Placa.ino             # aba: LED, botões, sensor, bateria, energia, economia e WiFi
+├── Tela.ino              # aba: telas do OLED, brilho e agenda
+├── Web.ino               # aba: utilitários, login e página principal
+├── WebAcoes.ino          # aba: busca de cidade e ações (POST)
+├── WebConfig.ino         # aba: página /config
 ├── EstacaoConfig.h      # senhas, chaves, placa/pinagem e configurações (não publicar)
 ├── EstacaoConfig.example.h  # modelo sem senhas: copie para EstacaoConfig.h
 ├── EstacaoFontes.h       # fontes (ícones Meteocons)
@@ -759,6 +782,8 @@ EstacaoMeteorologica/
 | **3.6.2** | Código reorganizado, sem mudar o funcionamento: `#include` com `<>` para bibliotecas e `""` só para os arquivos do projeto, agrupados por finalidade; `setup()` dividido em etapas do boot (`iniciaPinosESensor`, `iniciaDisplayBoot`, `conectaWiFiBoot`, `configuraOta`, `mostraResultadoWiFiBoot`, `iniciaInterfaceOled`, `iniciaServidorWeb`); importação do backup dividida por grupo (`importaClima`, `importaHora`, `importaDisplay`, `importaEnergia`, `importaPainel`); funções do exemplo original renomeadas para o português (`atualizaClima`, `desenhaDataHora`, `desenhaClimaAtual`, `desenhaPrevisao`, `desenhaBarraInferior`, `qualidadeSinal` e outras); utilitários e busca de cidade em seções próprias; mapa do arquivo atualizado |
 | **3.6.3** | Limpeza dos avisos de compilação, sem mudar o funcionamento: `BuscaCidade` e `LeitorBackup` marcadas como `final` (aviso do destrutor não virtual); parâmetros não usados sem nome (`c` em `whitespace`, `state` nas telas); textos de hora e data com buffers e tipos que o compilador consegue medir (`-Wformat-truncation`); idioma gravado na EEPROM com `toCharArray` |
 | **3.6.4** | Tela de abertura: placa e versão em duas linhas ("ESP8266" e "v3.6.4"); numa linha só o texto passava da tela e a versão aparecia cortada |
+| **3.7.0** | Código dividido em abas da Arduino IDE, sem mudar o funcionamento: a aba principal (`EstacaoMeteorologica.ino`) fica com bibliotecas, tipos, globais, protótipos, tabelas, `setup` e `loop`; as funções vão para `Config`, `Placa`, `Clima`, `Tela`, `Painel`, `Web`, `WebConfig`, `WebAcoes` e `Backup`. As abas `Tela` e `Placa` juntam o que muda no porte para ESP32. Ao atualizar uma pasta antiga, apague o `EstacaoMeteorologica.ino` antigo antes de copiar os novos |
+| **3.8.0** | Página **Sobre** (`/sobre`, sem senha): versão, placa e sensor deste aparelho, resumo do projeto, links do GitHub (firmware, painel e perfil), do manual e do painel online, e os créditos. Acesso pelo link **Sobre a estação** no rodapé da página principal e pelo item **Sobre** no menu da `/config`; o "‹ voltar" volta para a página de onde veio |
 
 ---
 
