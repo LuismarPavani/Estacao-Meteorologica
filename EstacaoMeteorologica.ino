@@ -35,61 +35,63 @@ See more at https://thingpulse.com
  *   4. Tipos
  *   5. Objetos e variáveis de estado
  *   6. Protótipos das funções
- *   7. Tabelas (telas do OLED, idiomas, fusos, abas)
- *   8. Funções: principal, configuração salva, LED, botões, sensores, bateria, clima, display OLED,
- *      tela (tempo ligada e agenda), WiFi, painel (API), servidor web
+ *   7. Tabelas (telas do OLED, idiomas, fusos, seções da /config e a página principal)
+ *   8. Funções: principal (setup, loop e etapas do boot), configuração salva, LED, botões, sensores,
+ *      bateria, energia externa, economia na bateria, clima, display OLED (telas e ícones), tela
+ *      (tempo ligada e agenda), WiFi, painel (API), servidor web (utilitários, login, páginas,
+ *      /config, busca de cidade e ações) e backup das configurações (exportar e importar)
+ *
+ * Nomes: funções e variáveis em português; 'desenha...' desenha no OLED, 'handle...' atende uma rota
+ * do servidor web, 'pagina...' monta uma página e 'cfg...' monta uma seção da /config.
  */
 
 // ==========================================================================================
 //  1. BIBLIOTECAS
 // ==========================================================================================
-// ---- Base do ESP8266, WiFi e servidor web -------------------------------------------------
+// Regra: <...> = core do ESP8266, C/C++ e bibliotecas instaladas; "..." = só arquivos desta pasta.
+// Ordem: core e sistema, rede, bibliotecas instaladas (por finalidade) e, por último, os do projeto.
+
+// ---- Core do ESP8266 e sistema --------------------------------------------------------------
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-
-// ---- Sistema: OTA, EEPROM (configurações salvas) e Ticker (LED sem travar o loop) ---------
 #include <ArduinoOTA.h>                 // atualização de firmware pela rede
-#include <EEPROM.h>                     // guarda chave/cidade/idioma na flash
+#include <EEPROM.h>                     // guarda os ajustes da /config na flash
 #include <Ticker.h>                     // pisca o LED de status sem travar o loop
-
-// ---- HTTP/HTTPS e JSON (envio ao painel e clima) ------------------------------------------
-#include <ESP8266HTTPClient.h>            // envio das leituras ao painel (API)
-#include <WiFiClientSecure.h>              // HTTPS
-#include <bearssl/bearssl.h>              // SHA-256 do login da /config (BearSSL já vem no core do ESP8266)
-#include <coredecls.h>                  // settimeofday_cb()
-#include <ESPHTTPClient.h>
-#include <JsonListener.h>
-#include <JsonStreamingParser.h>           // lê o JSON aos poucos (busca de cidades)
-
-// ---- Portal de configuração do WiFi -------------------------------------------------------
-#include <DNSServer.h>
-#include <WiFiManager.h>                // https://github.com/tzapu/WiFiManager
-
-// ---- Hora (NTP) ---------------------------------------------------------------------------
-#include <time.h>                       // time() ctime()
-#include <new>                          // new (std::nothrow): blocos da previsão sem travar se faltar memória
+#include <Wire.h>                       // I2C do display OLED
+#include <coredecls.h>                  // settimeofday_cb(): aviso de hora sincronizada (NTP)
+#include <time.h>                       // time(), localtime()
 #include <sys/time.h>                   // struct timeval
+#include <new>                          // new (std::nothrow): blocos da previsão sem travar se faltar memória
 
-// ---- Display OLED -------------------------------------------------------------------------
-#include "SSD1306Wire.h"
-#include "OLEDDisplayUi.h"
-#include "Wire.h"
+// ---- Rede: HTTP, HTTPS e portal do WiFi -----------------------------------------------------
+#include <ESP8266HTTPClient.h>          // envio das leituras ao painel (API)
+#include <WiFiClientSecure.h>           // HTTPS
+#include <bearssl/bearssl.h>            // SHA-256 do login da /config (o BearSSL vem no core)
+#include <DNSServer.h>                  // usado pelo portal do WiFiManager
+#include <WiFiManager.h>                // portal de configuração do WiFi (tzapu)
 
-// ---- Clima (OpenWeatherMap) ---------------------------------------------------------------
-#include "OpenWeatherMapCurrent.h"
-#include "OpenWeatherMapForecast.h"
+// ---- JSON lido aos poucos (busca de cidades e backup) ---------------------------------------
+#include <JsonListener.h>
+#include <JsonStreamingParser.h>
 
-// ---- Sol e Lua, calculados no próprio ESP (vêm na biblioteca ESP8266 Weather Station) ------
-#include "Astronomy.h"                  // fase e iluminação da Lua (só precisa da data)
-#include "SunMoonCalc.h"                // nascer/pôr do sol e da Lua e altura do sol (precisa das coordenadas)
+// ---- Display OLED (ThingPulse OLED SSD1306) -------------------------------------------------
+#include <SSD1306Wire.h>
+#include <OLEDDisplayUi.h>
 
-// ---- Fontes e imagens do projeto (arquivos .h na mesma pasta) -----------------------------
+// ---- Clima, Sol e Lua (ThingPulse ESP8266 Weather Station) ----------------------------------
+#include <ESPHTTPClient.h>
+#include <OpenWeatherMapCurrent.h>
+#include <OpenWeatherMapForecast.h>
+#include <Astronomy.h>                  // fase e iluminação da Lua (só precisa da data)
+#include <SunMoonCalc.h>                // nascer/pôr do sol e da Lua e altura do sol (precisa das coordenadas)
+
+// ---- Sensor de temperatura e umidade (Adafruit DHT) -----------------------------------------
+#include <DHT.h>
+
+// ---- Fontes e imagens do projeto (arquivos .h nesta pasta) ----------------------------------
 #include "EstacaoFontes.h"
 #include "EstacaoImagens.h"
-
-// ---- Sensor de temperatura e umidade ------------------------------------------------------
-#include "DHT.h"
 
 // ==========================================================================================
 //  2. SELEÇÃO DA PLACA E PINAGEM  e  3. CONFIGURAÇÕES DO PROJETO
@@ -98,15 +100,23 @@ See more at https://thingpulse.com
 // ==========================================================================================
 #include "EstacaoConfig.h"
 
-// Nome do sensor nas mensagens (página, seção Sistema e Serial), conforme o DHTTYPE escolhido acima
-#if DHTTYPE == DHT11
+// Modelo do sensor para a biblioteca (DHTTYPE) e nome nas mensagens (página, Sistema e Serial),
+// a partir do SENSOR_TIPO do EstacaoConfig.h. É um número porque DHT11/DHT22 são constantes de C++,
+// que o #if do pré-processador não enxerga.
+#if SENSOR_TIPO == 11
+  #define DHTTYPE DHT11
   #define SENSOR_NOME "DHT11"
-#elif DHTTYPE == DHT12
+#elif SENSOR_TIPO == 12
+  #define DHTTYPE DHT12
   #define SENSOR_NOME "DHT12"
-#elif DHTTYPE == DHT21
+#elif SENSOR_TIPO == 21
+  #define DHTTYPE DHT21
   #define SENSOR_NOME "DHT21"
-#else
+#elif SENSOR_TIPO == 22
+  #define DHTTYPE DHT22
   #define SENSOR_NOME "DHT22"
+#else
+  #error "SENSOR_TIPO invalido: use 11, 12, 21 ou 22"
 #endif
 
 // ==========================================================================================
@@ -164,14 +174,14 @@ struct Config {
 // para não guardar o JSON inteiro na RAM (cada cidade traz dezenas de nomes em outras línguas).
 // Formato: [{"name":"Campinas","local_names":{"pt":"Campinas",...},"lat":-22.9,"lon":-47.06,"country":"BR","state":"São Paulo"}, ...]
 // Em erro vem um objeto: {"cod":401,"message":"Invalid API key ..."}
-class BuscaCidade : public JsonListener {
+class BuscaCidade final : public JsonListener {   // final: apagada pelo próprio tipo (sem aviso de destrutor virtual)
   public:
     static const uint8_t MAX = 5;
     struct Resultado { String nome; String nomePt; String estado; String pais; float lat = 0; float lon = 0; };
     Resultado r[MAX];
     uint8_t n = 0;
     String erro = "";
-    void whitespace(char c) override {}
+    void whitespace(char /*c*/) override {}
     void startDocument() override {}
     void endDocument() override {}
     void startArray() override {}
@@ -207,13 +217,13 @@ class BuscaCidade : public JsonListener {
 
 // Leitor do arquivo de backup da /config (JSON de um nível só: {"formato":1,"brilho":80,...}).
 // Guarda os pares chave/valor do primeiro nível; objetos e listas internos são ignorados.
-class LeitorBackup : public JsonListener {
+class LeitorBackup final : public JsonListener {  // final: o delete do handleImportar não precisa de destrutor virtual
   public:
     static const uint8_t MAX = 40;      // o backup tem ~32 campos; sobra para versões futuras
     String k[MAX];
     String v[MAX];
     uint8_t n = 0;
-    void whitespace(char c) override {}
+    void whitespace(char /*c*/) override {}
     void startDocument() override {}
     void endDocument() override {}
     void startArray() override { nivel++; }
@@ -230,6 +240,18 @@ class LeitorBackup : public JsonListener {
   private:
     String chave = "";
     int nivel = 0;
+};
+
+// Estado de uma importação de backup: o arquivo lido, quantos ajustes foram aplicados e quais foram
+// ignorados. Passado para as funções importa...() (uma por grupo de ajustes da /config).
+struct Importacao {
+  LeitorBackup* b = nullptr;            // campos do arquivo
+  uint8_t aplicados = 0;
+  String ignorados = "";                // nomes dos campos com valor inválido, separados por vírgula
+  String s = "";                        // valor do último campo lido por pega()
+  bool pega(const __FlashStringHelper* nome);
+  void ignora(const __FlashStringHelper* nome);
+  void simNao(const __FlashStringHelper* nome, bool& var);
 };
 
 // Opção da lista de fusos horários (minutos em relação ao UTC e nome)
@@ -401,6 +423,15 @@ unsigned long btnDesde[2] = {0, 0};     // quando o botão foi pressionado
 //  Declaradas aqui para que a ordem das funções abaixo não importe.
 // ==========================================================================================
 
+// ---- PRINCIPAL: ETAPAS DO BOOT (chamadas pelo setup) ----------------------------------------
+void iniciaPinosESensor();
+void iniciaDisplayBoot();
+void conectaWiFiBoot(const String& hostname);
+void configuraOta(const String& hostname);
+void mostraResultadoWiFiBoot();
+void iniciaInterfaceOled();
+void iniciaServidorWeb();
+
 // ---- CONFIGURAÇÃO SALVA (EEPROM) E FUSO HORÁRIO -------------------------------------------
 void carregaConfig();
 void salvaConfig();
@@ -440,7 +471,7 @@ void energiaLeAgora();
 void atualizaEnergia(unsigned long ms);
 
 // ---- CLIMA (OpenWeatherMap) ---------------------------------------------------------------
-void updateData(OLEDDisplay *display);
+void atualizaClima(OLEDDisplay *display);
 
 // ---- DISPLAY OLED: TELAS E ÍCONES ---------------------------------------------------------
 void aplicaDisplay();
@@ -454,7 +485,7 @@ bool ecoIntervaloValido(int m);
 unsigned long intervaloEnvioMs();
 void ecoAcorda(unsigned long dur);
 void atualizaEco(unsigned long ms);
-void drawProgress(OLEDDisplay *display, int percentage, String label);
+void desenhaProgresso(OLEDDisplay *display, int percentage, String label);
 void mostraMensagemTela(const String& titulo, const String& l1, const String& l2, unsigned long dur);
 void desenhaMensagemTela();
 bool trataMensagemTela(unsigned long ms);
@@ -467,16 +498,16 @@ void desenhaEnvioEtapa(int pct, const String& texto);
 void desenhaResultadoEnvio();
 bool horaOk();
 void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const String& titulo);
-void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawCurrentWeatherDetails(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex);
-void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
-void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state);
+void desenhaDataHora(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaClimaAtual(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaClimaDetalhes(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaPrevisao(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaPrevisaoDia(OLEDDisplay *display, int x, int y, int dayIndex);
+void desenhaTelaWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaBarraInferior(OLEDDisplay *display, OLEDDisplayUiState* state);
 void desenhaIndicadores(OLEDDisplay *display, OLEDDisplayUiState* state);
-void drawSolLua(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void desenhaTelaSolLua(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void desenhaLua(OLEDDisplay *display, int cx, int cy, int r, uint8_t fase, float ilum, bool sul);
 void desenhaSeta(OLEDDisplay *display, int x, int y, bool cima);
 void desenhaSolPequeno(OLEDDisplay *display, int cx, int cy);
@@ -490,10 +521,10 @@ void desenhaConectando(uint8_t passo);
 void desenhaIconeWiFiGrande(int x, int y, int pct);
 void desenhaTelaIp();
 void calculaPrevisao(OpenWeatherMapForecastData* b, uint8_t n);
-void drawBateria(OLEDDisplay *display, int x, int y, int pct);
-void drawSinalWiFi(OLEDDisplay *display, int x, int y, int pct);
-void drawTomada(OLEDDisplay *display, int x, int y, bool ligada);
-int getRSSIasQuality(int rssi);
+void desenhaIconeBateria(OLEDDisplay *display, int x, int y, int pct);
+void desenhaIconeSinal(OLEDDisplay *display, int x, int y, int pct);
+void desenhaIconeTomada(OLEDDisplay *display, int x, int y, bool ligada);
+int qualidadeSinal(int rssi);
 
 // ---- TELA: TEMPO LIGADA E AGENDA ----------------------------------------------------------
 void armaTimerTela(unsigned long dur);
@@ -526,6 +557,8 @@ void redirecionaConfig(const char* r);
 String fmtBytes(uint32_t b);
 String formataUptime(unsigned long s);
 String linhaInfoP(const __FlashStringHelper* rotulo, const String& valor);
+String urlEncode(const String& s);
+int8_t parseCoord(String s, float& out, float minimo, float maximo);
 // Os rótulos das linhas de informação (dezenas de textos fixos) ficam na flash, não na RAM
 #define linhaInfo(rotulo, valor) linhaInfoP(F(rotulo), (valor))
 
@@ -571,10 +604,13 @@ void cfgWiFi(const String& r);
 void cfgLed(const String& r);
 void cfgSistema(const String& r);
 void paginaConfig();
-void handleHora();
+
+// ---- SERVIDOR WEB: BUSCA DE CIDADE (GET) ------------------------------------------------
+void handleBuscaCidade();
 
 // ---- SERVIDOR WEB: AÇÕES (POST) -----------------------------------------------------------
 void handleSalvar();
+void handleHora();
 void handleApi();
 void handleEnviar();
 void handleTempoLigada();
@@ -584,17 +620,23 @@ void handleEconomia();
 void handleLed();
 void handleBrilho();
 void handleTelas();
-void handleBuscaCidade();
-int8_t parseCoord(String s, float& out, float minimo, float maximo);
-String urlEncode(const String& s);
 void handleAgenda();
 void handleDisplay();
 void handleResetWiFi();
 void handleResetGeral();
 void handleReiniciar();
 void handlePortal();
+
+// ---- BACKUP DAS CONFIGURAÇÕES (exportar e importar) -----------------------------------------
 String backupJson();
 void handleExportar();
+bool leSimNao(const String& s, bool& out);
+bool leInteiro(const String& s, long& out);
+void importaClima(Importacao& imp);
+void importaHora(Importacao& imp);
+void importaDisplay(Importacao& imp);
+void importaEnergia(Importacao& imp);
+void importaPainel(Importacao& imp);
 void handleImportar();
 
 // ==========================================================================================
@@ -603,7 +645,7 @@ void handleImportar();
 
 // ---- Telas do OLED (deslizam da direita para a esquerda) e barra inferior -----------------
 // Todas as telas, na ordem em que aparecem. Em /config → Tela escolhe-se quais entram (telasMask, bit k = TELAS[k]).
-FrameCallback TELAS[] = {drawDateTime, drawClimaInterno, drawCurrentWeather, drawCurrentWeatherDetails, drawForecast, drawSolLua, drawWiFi};
+FrameCallback TELAS[] = {desenhaDataHora, desenhaClimaInterno, desenhaClimaAtual, desenhaClimaDetalhes, desenhaPrevisao, desenhaTelaSolLua, desenhaTelaWiFi};
 static const char TELA_NOME_0[] PROGMEM = "Data e hora";
 static const char TELA_NOME_1[] PROGMEM = "Clima interno";
 static const char TELA_NOME_2[] PROGMEM = "Clima atual";
@@ -616,7 +658,7 @@ const uint8_t TELAS_TOTAL = 7;
 const uint8_t TELA_WIFI = 6;            // índice da tela 'WiFi e bateria' (a que mostra o IP)
 FrameCallback framesAtivos[7];          // só as telas marcadas (montado por aplicaTelas())
 uint8_t numTelasAtivas = 0;
-OverlayCallback overlays[] = { drawHeaderOverlay };
+OverlayCallback overlays[] = { desenhaBarraInferior };
 int numberOfOverlays = 1;
 
 // ---- Idiomas do OpenWeatherMap (lista da página /config) ----------------------------------
@@ -1024,9 +1066,8 @@ load();hist();setInterval(load,5000);setInterval(hist,60000);
 // ---- PRINCIPAL ----------------------------------------------------------------------------
 
 /**
- * Inicialização (roda uma vez ao ligar): configura LED, botões, display e sensor; conecta ao WiFi
- * (WiFiManager abre o portal se precisar); sincroniza a hora (NTP); inicia OTA e a interface do
- * OLED; faz as primeiras leituras e a primeira consulta de clima; liga o servidor web.
+ * Inicialização (roda uma vez ao ligar), em etapas: configuração salva, pinos e sensor, display e
+ * abertura, WiFi (ou portal), hora (NTP), OTA, interface do OLED, primeiras leituras e servidor web.
  */
 void setup() {
   Serial.begin(115200);
@@ -1036,6 +1077,26 @@ void setup() {
   EEPROM.begin(sizeof(Config));
   carregaConfig();
 
+  iniciaPinosESensor();                 // LED, botões, sensor de energia e DHT
+  iniciaDisplayBoot();                  // display, varredura I2C e tela de abertura
+
+  String hostname(HOSTNAME);            // nome na rede e na porta OTA: prefixo + ID do chip
+  hostname += String(ESP.getChipId(), HEX);
+  conectaWiFiBoot(hostname);            // rede salva (ou portal do WiFiManager, sem rede salva)
+  aplicaFuso();                         // hora pela internet (sincroniza sozinha quando houver rede)
+  configuraOta(hostname);
+  mostraResultadoWiFiBoot();            // tela 'WiFi conectado' com o IP, ou 'Sem WiFi'
+  iniciaInterfaceOled();                // clientes do OpenWeatherMap e telas que deslizam
+
+  Serial.println(F(""));
+  leSensor();
+  if (bateriaAtiva) atualizaBateria();
+  atualizaClima(&display);
+  iniciaServidorWeb();
+}
+
+/** Boot: LED de status, botões, sensor de energia da placa UPS e sensor DHT. */
+void iniciaPinosESensor() {
   ledInicia();                          // LED de status (apagado até algo acontecer)
   if (PIN_BOTAO_TELA >= 0) pinMode(PIN_BOTAO_TELA, INPUT_PULLUP);
   if (PIN_BOTAO_RESET >= 0) pinMode(PIN_BOTAO_RESET, INPUT_PULLUP);
@@ -1043,11 +1104,12 @@ void setup() {
     pinMode(PIN_ENERGIA, (PIN_ENERGIA == 16) ? INPUT_PULLDOWN_16 : INPUT);
     if (energiaAtiva) energiaLeAgora();
   }
-
   delay(50);
   dht.begin();
+}
 
-  // inicia o display
+/** Boot: inicia o display, lista o barramento I2C no Serial e mostra a abertura e 'Conectando ao WiFi'. */
+void iniciaDisplayBoot() {
   display.init();
   display.clear();
   display.display();
@@ -1060,9 +1122,16 @@ void setup() {
 
   //display.flipScreenVertically();
   desenhaConectando(0);                 // 'Conectando ao WiFi' com o ícone e os 3 pontos animados
+}
 
-  String hostname(HOSTNAME);
-  hostname += String(ESP.getChipId(), HEX);
+/**
+ * Boot: conecta ao WiFi. Com rede salva, tenta por WIFI_BOOT_TIMEOUT_MS e, se não der, segue SEM WiFi
+ * (sensor, display, botões e histórico continuam; o ESP reconecta sozinho quando o roteador voltar).
+ * Assim uma queda de energia que derrube o roteador não deixa a estação reiniciando em loop.
+ * Sem rede salva (1ª vez ou depois de apagar o WiFi): abre o portal; se ninguém configurar em 3 min,
+ * reinicia. As credenciais salvas NUNCA são apagadas automaticamente.
+ */
+void conectaWiFiBoot(const String& hostname) {
   WiFi.hostname(hostname);
 
   // Descomente para testar o portal do WiFiManager (apaga a rede salva a cada boot)
@@ -1074,11 +1143,6 @@ void setup() {
   wifiManager.setMenu(menu);
   wifiManager.setClass("invert");
 
-  // Com rede salva: tenta conectar por WIFI_BOOT_TIMEOUT_MS e, se não der, segue SEM WiFi (sensor, display,
-  // botões e histórico continuam; o ESP reconecta sozinho quando o roteador voltar). Assim uma queda de
-  // energia que derrube o roteador não deixa a estação reiniciando em loop.
-  // Sem rede salva (1ª vez ou depois de apagar o WiFi): abre o portal; se ninguém configurar em 3 min, reinicia.
-  // As credenciais salvas NUNCA são apagadas automaticamente (uma queda do roteador não pode zerar o WiFi).
   wifiManager.setConnectTimeout(30);
   wifiManager.setConfigPortalTimeout(180);
   ledRede = LED_CONECTANDO;             // pisca rápido enquanto conecta (e com o portal aberto)
@@ -1103,16 +1167,20 @@ void setup() {
     delay(2000);
     ESP.restart();
   }
+}
 
-  // Get time from network time service (sincroniza sozinho quando houver rede)
-  aplicaFuso();
-
-  // OTA: permite enviar novo firmware pelo WiFi (Arduino IDE > Porta de rede). Só inicia com rede
-  // (iniciaOta(), também chamada pelo loop quando o WiFi conecta depois do boot).
+/**
+ * Boot: prepara o OTA (enviar firmware pelo WiFi: Arduino IDE > Porta de rede). Ele só inicia com
+ * rede: iniciaOta(), chamada aqui ou pelo loop quando o WiFi conectar depois do boot.
+ */
+void configuraOta(const String& hostname) {
   ArduinoOTA.setHostname(hostname.c_str());
   ArduinoOTA.setPassword(OTA_SENHA);   // senha definida em EstacaoConfig.h
   ArduinoOTA.onStart([]() { ecoAcorda(10UL * 60UL * 1000UL); });   // gravação pelo WiFi sem light sleep (economia na bateria)
+}
 
+/** Boot: com WiFi, inicia o OTA e mostra a tela 'WiFi conectado'; sem WiFi, avisa que segue sem rede. */
+void mostraResultadoWiFiBoot() {
   if (WiFi.status() == WL_CONNECTED) {
     ledRede = LED_NORMAL;               // conectou
     ledPulsoOk();
@@ -1133,7 +1201,10 @@ void setup() {
     display.display();
     delay(2000);
   }
+}
 
+/** Boot: clientes do OpenWeatherMap (unidade e idioma) e a interface de telas que deslizam no OLED. */
+void iniciaInterfaceOled() {
   currentWeatherClient.setMetric(IS_METRIC);
   currentWeatherClient.setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
   forecastClient.setMetric(IS_METRIC);
@@ -1156,13 +1227,10 @@ void setup() {
   brilhoAplicado = 0xFF;                // ui.init() reinicia o display e volta o contraste ao padrão: reenvia o brilho
   aplicaDisplay();                      // ui.init() religa a tela; reaplica o estado salvo (e o brilho)
   if (displayLigado) armaTimerTela(telaDuracaoPadraoMs());   // tempo de tela ligada (0 = sempre ligada)
+}
 
-  Serial.println(F(""));
-
-  leSensor();
-  if (bateriaAtiva) atualizaBateria();
-  updateData(&display);
-
+/** Boot: registra as rotas do servidor web (página, /config, ações e backup) e o liga. */
+void iniciaServidorWeb() {
   server.on(F("/"), HTTP_GET, paginaInicial);
   server.on(F("/json"), HTTP_GET, paginaJson);
   server.on(F("/historico"), HTTP_GET, paginaHistorico);
@@ -1284,7 +1352,7 @@ void loop() {
   }
 
   if (readyForWeatherUpdate && (!displayLigado || ui.getUiState()->frameState == FIXED)) {
-    updateData(&display);
+    atualizaClima(&display);
   }
 
   if (displayLigado && !segurandoReset && !mostrandoMsg) {
@@ -1372,7 +1440,7 @@ void salvaConfig() {
   c.magic = CFG_MAGIC;
   snprintf(c.apiKey, sizeof(c.apiKey), "%s", OPEN_WEATHER_MAP_APP_ID.c_str());
   snprintf(c.locationId, sizeof(c.locationId), "%s", OPEN_WEATHER_MAP_LOCATION_ID.c_str());
-  snprintf(c.lang, sizeof(c.lang), "%s", OPEN_WEATHER_MAP_LANGUAGE.c_str());
+  OPEN_WEATHER_MAP_LANGUAGE.toCharArray(c.lang, sizeof(c.lang));   // corta no tamanho do campo e sempre termina com '\0'
   c.displayLigado = displayLigado ? 1 : 0;
   c.agendaAtiva = agendaAtiva ? 1 : 0;
   c.fusoOk = 0xA5;
@@ -1829,7 +1897,7 @@ void atualizaEco(unsigned long ms) {
  * faltar a chave da API, mostra um aviso com o endereço da /config. Define weatherOk e agenda a
  * próxima consulta (ou nova tentativa se falhar).
  */
-void updateData(OLEDDisplay *display) {
+void atualizaClima(OLEDDisplay *display) {
   ecoAcorda(30000UL);                    // consulta do clima sem light sleep
   readyForWeatherUpdate = false;
   static bool primeiraVez = true;        // 1ª consulta = a do boot: mostra avisos mais longos no OLED
@@ -1866,7 +1934,7 @@ void updateData(OLEDDisplay *display) {
     return;
   }
 
-  drawProgress(display, 20, F("Atualizando o clima..."));
+  desenhaProgresso(display, 20, F("Atualizando o clima..."));
   String cidadeAnterior = currentWeather.cityName;
   currentWeather.cityName = "";          // se continuar vazio depois, a consulta falhou
   // Por coordenadas quando já são conhecidas (a consulta por ID é obsoleta); na 1ª vez, pelo ID da cidade
@@ -1883,7 +1951,7 @@ void updateData(OLEDDisplay *display) {
     Serial.printf_P(PSTR("Coordenadas da cidade: %.4f, %.4f\n"), cidadeLat, cidadeLon);
   }
 
-  drawProgress(display, 60, F("Atualizando previsões..."));
+  desenhaProgresso(display, 60, F("Atualizando previsões..."));
   // Todos os blocos de 3 h (até 4 dias), numa consulta só; a memória é liberada logo depois
   OpenWeatherMapForecastData* blocos = new (std::nothrow) OpenWeatherMapForecastData[MAX_BLOCOS_PREVISAO]();
   if (blocos) {
@@ -1898,7 +1966,7 @@ void updateData(OLEDDisplay *display) {
 
   if (weatherOk) climaRecebido = true;
   else if (climaRecebido) currentWeather.cityName = cidadeAnterior;   // falhou: o OLED segue com os últimos dados bons
-  drawProgress(display, 100, weatherOk ? F("Pronto...") : F("Falha ao obter o clima"));
+  desenhaProgresso(display, 100, weatherOk ? F("Pronto...") : F("Falha ao obter o clima"));
   delay(noBoot ? (weatherOk ? 700 : 2500) : 300);   // no boot a tela de progresso fica visível por mais tempo
 
   nextWeatherUpdate = millis() + (weatherOk ? UPDATE_INTERVAL_MS : API_RETRY_MS);
@@ -1997,13 +2065,15 @@ void desenhaAbertura() {
   display.drawString(56, 8, F("Estação"));
   display.setFont(ArialMT_Plain_10);     // "Meteorológica" em 16 passaria da tela (~104 px); em 10 tem ~65 px
   display.drawString(56, 27, F("Meteorológica"));
-  display.setFont(ArialMT_Plain_10);
-  display.drawString(56, 46, "ESP8266  v" FIRMWARE_VERSAO);
+  // Placa e versão em duas linhas: "ESP8266  v3.6.x" numa linha só tem ~80 px e passa dos 72 px
+  // que sobram à direita do logo (o OLED corta o fim, e a versão aparecia só como "3.6").
+  display.drawString(56, 40, F("ESP8266"));
+  display.drawString(56, 51, "v" FIRMWARE_VERSAO);
   display.display();
 }
 
 /** Mostra no OLED uma mensagem com barra de progresso (usada durante a atualização do clima). */
-void drawProgress(OLEDDisplay *display, int percentage, String label) {
+void desenhaProgresso(OLEDDisplay *display, int percentage, String label) {
   display->clear();
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->setFont(ArialMT_Plain_10);
@@ -2209,7 +2279,7 @@ void desenhaSemClima(OLEDDisplay *display, int16_t x, int16_t y, const String& t
 }
 
 /** Tela 1 do OLED: dia da semana, data e hora ('--' até a hora da internet sincronizar). */
-void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaDataHora(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   now = time(nullptr);
   struct tm* timeInfo;
   timeInfo = localtime(&now);
@@ -2236,7 +2306,7 @@ void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
 }
 
 /** Tela 2 do OLED: umidade e temperatura internas do sensor, com uma casa decimal. */
-void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->drawString(22 + x, y, F("CLIMA INTERNO"));
@@ -2259,7 +2329,7 @@ void drawClimaInterno(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x
 }
 
 /** Tela 3 do OLED: ícone, temperatura, cidade e descrição do clima atual. */
-void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaClimaAtual(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   if (!climaRecebido) { desenhaSemClima(display, x, y, F("CLIMA ATUAL")); return; }
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
@@ -2283,7 +2353,7 @@ void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
  * Tela 4 do OLED ('PRÓXIMAS 24 H'): mínima e máxima das próximas 24 h, umidade, sensação térmica,
  * chuva prevista nas 24 h e vento. Pressão e visibilidade ficam na página web.
  */
-void drawCurrentWeatherDetails(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaClimaDetalhes(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   if (!climaRecebido) { desenhaSemClima(display, x, y, F("PRÓXIMAS 24 H")); return; }
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
@@ -2307,16 +2377,16 @@ void drawCurrentWeatherDetails(OLEDDisplay *display, OLEDDisplayUiState* state, 
   display->drawString(60 + x, 36 + y, F("Ven: ") + String(wind, 0) + (IS_METRIC ? F("km/h") : F("mph")));
 }
 
-/** Tela 5 do OLED: previsão dos próximos 3 dias (usa drawForecastDetails para cada dia). */
-void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+/** Tela 5 do OLED: previsão dos próximos 3 dias (usa desenhaPrevisaoDia para cada dia). */
+void desenhaPrevisao(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   if (!climaRecebido) { desenhaSemClima(display, x, y, F("PRÓXIMOS DIAS")); return; }
-  drawForecastDetails(display, x, y, 0);
-  drawForecastDetails(display, x + 44, y, 1);
-  drawForecastDetails(display, x + 88, y, 2);
+  desenhaPrevisaoDia(display, x, y, 0);
+  desenhaPrevisaoDia(display, x + 44, y, 1);
+  desenhaPrevisaoDia(display, x + 88, y, 2);
 }
 
 /** Desenha uma coluna da previsão: dia da semana, ícone e temperatura. */
-void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
+void desenhaPrevisaoDia(OLEDDisplay *display, int x, int y, int dayIndex) {
   time_t observationTimestamp = forecasts[dayIndex].observationTime;
   struct tm* timeInfo;
   timeInfo = localtime(&observationTimestamp);
@@ -2342,7 +2412,7 @@ void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
  * Tela 6 do OLED: bateria (com a tomada indicando energia externa), sinal do WiFi (ícone, dBm e
  * %), nome da rede (SSID) e IP.
  */
-void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaTelaWiFi(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   char aux[48];
   int32_t rssi = WiFi.RSSI();
 
@@ -2351,21 +2421,21 @@ void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_
 
   // Linha 1: bateria
   if (bateriaAtiva) {
-    drawBateria(display, x, y + 2, bateriaPct);
+    desenhaIconeBateria(display, x, y + 2, bateriaPct);
     display->drawString(x + 24, y, String(bateriaPct) + F("%  ") + String(bateriaV, 2) + F("V"));
   } else {
     display->drawString(x, y, F("Bateria: desativada"));
   }
-  if (energiaAtiva && PIN_ENERGIA >= 0) drawTomada(display, x + 112, y, energiaExterna);   // tomada: energia externa conectada ou não
+  if (energiaAtiva && PIN_ENERGIA >= 0) desenhaIconeTomada(display, x + 112, y, energiaExterna);   // tomada: energia externa conectada ou não
 
   // Linha 2: potência do sinal (ícone + dBm + %)
   if (WiFi.status() == WL_CONNECTED) {
-    int pct = getRSSIasQuality(rssi);
-    drawSinalWiFi(display, x, 12 + y, pct);
+    int pct = qualidadeSinal(rssi);
+    desenhaIconeSinal(display, x, 12 + y, pct);
     snprintf(aux, sizeof(aux), "%ddBm  %d%%", (int)rssi, pct);
     display->drawString(x + 24, 12 + y, aux);
   } else {
-    drawSinalWiFi(display, x, 12 + y, 0);
+    desenhaIconeSinal(display, x, 12 + y, 0);
     display->drawString(x + 24, 12 + y, F("sem WiFi"));
   }
 
@@ -2379,7 +2449,7 @@ void drawWiFi(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_
 }
 
 /** Barra inferior fixa em todas as telas: hora à esquerda e temperatura externa à direita. */
-void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
+void desenhaBarraInferior(OLEDDisplay *display, OLEDDisplayUiState* state) {
   now = time(nullptr);
   struct tm* timeInfo;
   timeInfo = localtime(&now);
@@ -2421,7 +2491,7 @@ void desenhaIndicadores(OLEDDisplay *display, OLEDDisplayUiState* state) {
 String horaCurta(time_t t) {
   if (t <= 0) return F("--:--");
   struct tm* ti = localtime(&t);
-  char b[8];
+  char b[16];   // folga para o compilador (int com sinal), evita -Wformat-truncation
   snprintf(b, sizeof(b), "%02d:%02d", ti->tm_hour, ti->tm_min);
   return String(b);
 }
@@ -2516,7 +2586,7 @@ void desenhaLua(OLEDDisplay *display, int cx, int cy, int r, uint8_t fase, float
  * Tela 'Sol e Lua': nascer e pôr do sol e da Lua (com as coordenadas da cidade) e a Lua desenhada
  * com a fase e a porcentagem iluminada (só com a data).
  */
-void drawSolLua(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+void desenhaTelaSolLua(OLEDDisplay *display, OLEDDisplayUiState* /*state*/, int16_t x, int16_t y) {
   display->setColor(WHITE);
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
@@ -2606,7 +2676,7 @@ void desenhaIconeWiFiGrande(int x, int y, int pct) {
  */
 void desenhaTelaIp() {
   int rssi = WiFi.RSSI();
-  int pct = getRSSIasQuality(rssi);
+  int pct = qualidadeSinal(rssi);
   display.clear();
   desenhaCabecalho(F("WIFI CONECTADO"));
   desenhaIconeWiFiGrande(4, 15, pct);
@@ -2626,8 +2696,10 @@ void desenhaTelaIp() {
   display.display();
 }
 
+// ---- Ícones da barra inferior (bateria, sinal do WiFi e tomada) ----------------------------
+
 /** Desenha o ícone de bateria (20x9 px) com o nível proporcional ao percentual. */
-void drawBateria(OLEDDisplay *display, int x, int y, int pct) {
+void desenhaIconeBateria(OLEDDisplay *display, int x, int y, int pct) {
   display->drawRect(x, y, 18, 9);                          // corpo
   display->fillRect(x + 18, y + 2, 2, 5);                  // ponta
   display->fillRect(x + 2, y + 2, (pct * 14) / 100, 5);    // nível
@@ -2637,7 +2709,7 @@ void drawBateria(OLEDDisplay *display, int x, int y, int pct) {
  * Desenha o ícone de sinal de WiFi (4 barras crescentes, 15x10 px), igual ao da página web. Barras
  * cheias = força do sinal; as demais ficam só com o contorno.
  */
-void drawSinalWiFi(OLEDDisplay *display, int x, int y, int pct) {
+void desenhaIconeSinal(OLEDDisplay *display, int x, int y, int pct) {
   int n = 0;
   if (pct >= 75) n = 4;
   else if (pct >= 50) n = 3;
@@ -2656,7 +2728,7 @@ void drawSinalWiFi(OLEDDisplay *display, int x, int y, int pct) {
  * Desenha o ícone de tomada no OLED (12x10 px): cheio = energia externa conectada; só contorno e
  * riscado = sem energia externa (rodando na bateria).
  */
-void drawTomada(OLEDDisplay *display, int x, int y, bool ligada) {
+void desenhaIconeTomada(OLEDDisplay *display, int x, int y, bool ligada) {
   display->fillRect(x + 3, y, 1, 3);            // pino esquerdo
   display->fillRect(x + 8, y, 1, 3);            // pino direito
   if (ligada) display->fillRect(x + 1, y + 3, 10, 4);   // corpo cheio
@@ -2666,7 +2738,7 @@ void drawTomada(OLEDDisplay *display, int x, int y, bool ligada) {
 }
 
 /** Converte o sinal em dBm para qualidade de 0 a 100%. */
-int getRSSIasQuality(int rssi) {
+int qualidadeSinal(int rssi) {
   if (rssi <= -100) return 0;
   if (rssi >= -50) return 100;
   return 2 * (rssi + 100);
@@ -2845,7 +2917,7 @@ String montaPayloadApi() {
   j += F(",\"send_interval_s\":") + String(intervaloEnvioMs() / 1000UL);
   j += F(",\"display_on\":");
   j += displayLigado ? F("true") : F("false");
-  j += F(",\"rssi_pct\":") + String(getRSSIasQuality(rssi));
+  j += F(",\"rssi_pct\":") + String(qualidadeSinal(rssi));
   j += F("}");
   return j;
 }
@@ -2962,7 +3034,7 @@ String jsonEscape(const String& s) {
 
 /** Converte minutos desde 00:00 para o formato 'HH:MM'. */
 String formataHora(int minutos) {
-  char b[8];
+  char b[16];   // folga para o compilador (int com sinal), evita -Wformat-truncation
   snprintf(b, sizeof(b), "%02d:%02d", minutos / 60, minutos % 60);
   return String(b);
 }
@@ -3071,6 +3143,38 @@ String formataUptime(unsigned long s) {
 /** Monta uma linha de informação da /config (rótulo à esquerda, valor à direita, como nos Ajustes do iPhone). */
 String linhaInfoP(const __FlashStringHelper* rotulo, const String& valor) {
   return F("<div class=\"it\"><span class=\"tx\">") + String(rotulo) + F("</span><span class=\"val\">") + valor + F("</span></div>");
+}
+
+/** Codifica um texto para ir numa URL (espaços, acentos e símbolos viram %XX; UTF-8 byte a byte). */
+String urlEncode(const String& s) {
+  String o;
+  o.reserve(s.length() * 3);
+  const char* hex = "0123456789ABCDEF";
+  for (size_t k = 0; k < s.length(); k++) {
+    uint8_t c = (uint8_t)s[k];
+    if (isAlphaNumeric(c) || c == '-' || c == '_' || c == '.' || c == '~') o += (char)c;
+    else { o += '%'; o += hex[c >> 4]; o += hex[c & 15]; }
+  }
+  return o;
+}
+
+/**
+ * Lê uma coordenada em graus decimais ('-22.9056' ou '-22,9056') e confere a faixa. Devolve 0 se o
+ * texto está vazio, 1 se é válida (valor em 'out') e -1 se é inválida.
+ */
+int8_t parseCoord(String s, float& out, float minimo, float maximo) {
+  s.trim();
+  if (s.length() == 0) return 0;
+  s.replace(',', '.');
+  bool temDigito = false;
+  for (size_t k = 0; k < s.length(); k++) {
+    char c = s[k];
+    if (isDigit(c)) temDigito = true;
+    else if (!(c == '.' || (k == 0 && (c == '-' || c == '+')))) return -1;
+  }
+  if (!temDigito || s.length() > 14) return -1;
+  out = s.toFloat();
+  return (out >= minimo && out <= maximo) ? 1 : -1;
 }
 
 // ---- SERVIDOR WEB: LOGIN DA /config -------------------------------------------------------
@@ -3294,7 +3398,7 @@ void paginaJson() {
          String((int)(luaIlum * 100 + 0.5f)) + F(",\"nasce\":") + String(astroOk ? (unsigned long)luaNasce : 0UL) +
          F(",\"poe\":") + String(astroOk ? (unsigned long)luaPoe : 0UL) + F("}");
   } else j += F("null");
-  j += F(",\"rssi\":") + String(WiFi.RSSI()) + F(",\"rssiPct\":") + String(getRSSIasQuality(WiFi.RSSI())) + F("}");
+  j += F(",\"rssi\":") + String(WiFi.RSSI()) + F(",\"rssiPct\":") + String(qualidadeSinal(WiFi.RSSI())) + F("}");
   server.send(200, "application/json", j);
 }
 
@@ -3382,7 +3486,7 @@ String tabelaWiFi() {
 
   if (conectado) {
     int rssi = WiFi.RSSI();
-    int pct = getRSSIasQuality(rssi);
+    int pct = qualidadeSinal(rssi);
     const char* nivel = pct >= 75 ? "Excelente" : (pct >= 50 ? "Bom" : (pct >= 25 ? "Regular" : "Fraco"));
 
     const char* phy = "?";
@@ -3435,8 +3539,9 @@ String tabelaSistema() {
   time_t agora = time(nullptr);
   if (agora > 100000) {
     struct tm* ti = localtime(&agora);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900, ti->tm_hour, ti->tm_min, ti->tm_sec);
+    char buf[32];   // com os casts o compilador sabe o tamanho máximo (evita -Wformat-truncation)
+    snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", (uint8_t)ti->tm_mday, (uint8_t)(ti->tm_mon + 1), (uint16_t)(ti->tm_year + 1900),
+             (uint8_t)ti->tm_hour, (uint8_t)ti->tm_min, (uint8_t)ti->tm_sec);
     t += linhaInfo("Data e hora (NTP)", buf);
   } else {
     t += linhaInfo("Data e hora (NTP)", F("Sem sincronização"));
@@ -3765,8 +3870,9 @@ void cfgHora(const String& r) {
   if (horaOk()) {
     time_t t = time(nullptr);
     struct tm* ti = localtime(&t);
-    char b[24];
-    snprintf(b, sizeof(b), "%02d/%02d/%04d %02d:%02d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900, ti->tm_hour, ti->tm_min);
+    char b[32];   // com os casts o compilador sabe o tamanho máximo (evita -Wformat-truncation)
+    snprintf(b, sizeof(b), "%02d/%02d/%04d %02d:%02d", (uint8_t)ti->tm_mday, (uint8_t)(ti->tm_mon + 1), (uint16_t)(ti->tm_year + 1900),
+             (uint8_t)ti->tm_hour, (uint8_t)ti->tm_min);
     agora = b;
   }
   String h;
@@ -3939,20 +4045,7 @@ void paginaConfig() {
   else cfgMenu(r);
 }
 
-// ---- SERVIDOR WEB: AÇÕES (POST) -----------------------------------------------------------
-
-/** Codifica um texto para ir numa URL (espaços, acentos e símbolos viram %XX; UTF-8 byte a byte). */
-String urlEncode(const String& s) {
-  String o;
-  o.reserve(s.length() * 3);
-  const char* hex = "0123456789ABCDEF";
-  for (size_t k = 0; k < s.length(); k++) {
-    uint8_t c = (uint8_t)s[k];
-    if (isAlphaNumeric(c) || c == '-' || c == '_' || c == '.' || c == '~') o += (char)c;
-    else { o += '%'; o += hex[c >> 4]; o += hex[c & 15]; }
-  }
-  return o;
-}
+// ---- SERVIDOR WEB: BUSCA DE CIDADE (GET) ------------------------------------------------
 
 /**
  * GET /buscar-cidade?q=Campinas,BR: busca a cidade pelo nome na API de geocodificação do
@@ -4009,24 +4102,7 @@ void handleBuscaCidade() {
   server.send(200, "application/json", j);
 }
 
-/**
- * Lê uma coordenada em graus decimais ('-22.9056' ou '-22,9056') e confere a faixa. Devolve 0 se o
- * texto está vazio, 1 se é válida (valor em 'out') e -1 se é inválida.
- */
-int8_t parseCoord(String s, float& out, float minimo, float maximo) {
-  s.trim();
-  if (s.length() == 0) return 0;
-  s.replace(',', '.');
-  bool temDigito = false;
-  for (size_t k = 0; k < s.length(); k++) {
-    char c = s[k];
-    if (isDigit(c)) temDigito = true;
-    else if (!(c == '.' || (k == 0 && (c == '-' || c == '+')))) return -1;
-  }
-  if (!temDigito || s.length() > 14) return -1;
-  out = s.toFloat();
-  return (out >= minimo && out <= maximo) ? 1 : -1;
-}
+// ---- SERVIDOR WEB: AÇÕES (POST) -----------------------------------------------------------
 
 /** POST /salvar: valida e salva chave, cidade (coordenadas e/ou ID), idioma e fuso do OpenWeatherMap. */
 void handleSalvar() {
@@ -4480,6 +4556,147 @@ bool leInteiro(const String& s, long& out) {
   return true;
 }
 
+/** Lê o campo 'nome' do arquivo em 's' (sem espaços nas pontas); false se ele não veio. */
+bool Importacao::pega(const __FlashStringHelper* nome) {
+  int i = b->busca(nome);
+  if (i < 0) return false;
+  s = b->v[i];
+  s.trim();
+  return true;
+}
+
+/** Anota um campo com valor inválido (o ESP mantém o valor atual dele). */
+void Importacao::ignora(const __FlashStringHelper* nome) {
+  if (ignorados.length()) ignorados += F(", ");
+  ignorados += nome;
+}
+
+/** Liga/desliga: aplica em 'var' se o campo veio como true/false; senão, ignora. */
+void Importacao::simNao(const __FlashStringHelper* nome, bool& var) {
+  if (!pega(nome)) return;
+  bool v;
+  if (leSimNao(s, v)) { var = v; aplicados++; } else ignora(nome);
+}
+
+/** Importa a chave do OpenWeatherMap (em branco = mantém a atual), a cidade e o idioma. */
+void importaClima(Importacao& imp) {
+  String& s = imp.s;
+  if (imp.pega(F("owmChave")) && s.length()) {
+    bool ok = s.length() >= 20 && s.length() <= 40;
+    for (size_t k = 0; k < s.length(); k++) if (!isAlphaNumeric(s[k])) ok = false;
+    if (ok) { OPEN_WEATHER_MAP_APP_ID = s; imp.aplicados++; } else imp.ignora(F("owmChave"));
+  }
+
+  // Cidade: ID e/ou coordenadas, com as regras da /config (precisa de um dos dois)
+  bool temId = imp.pega(F("cidadeId"));
+  String id = temId ? s : String("");
+  String latS = imp.pega(F("lat")) ? s : String("");
+  String lonS = imp.pega(F("lon")) ? s : String("");
+  if (temId || latS.length() || lonS.length()) {
+    bool idOk = id.length() <= 10;
+    for (size_t k = 0; k < id.length(); k++) if (!isDigit(id[k])) idOk = false;
+    float lat = 0, lon = 0;
+    int8_t okLat = parseCoord(latS, lat, -90, 90);
+    int8_t okLon = parseCoord(lonS, lon, -180, 180);
+    bool coordValida = okLat == 1 && okLon == 1;
+    bool coordErrada = okLat < 0 || okLon < 0 || (okLat == 0) != (okLon == 0);
+    if (!idOk || coordErrada || (id.length() == 0 && !coordValida)) imp.ignora(F("cidade"));
+    else {
+      OPEN_WEATHER_MAP_LOCATION_ID = id;
+      coordOk = coordValida;             // sem coordenadas: o ESP descobre pelo ID na 1ª consulta
+      if (coordValida) { cidadeLat = lat; cidadeLon = lon; }
+      imp.aplicados++;
+    }
+  }
+
+  if (imp.pega(F("idioma"))) {
+    bool ok = false;
+    for (uint8_t k = 0; k < LANG_COUNT; k++) if (s.equals(LANG_CODES[k])) ok = true;
+    if (ok) { OPEN_WEATHER_MAP_LANGUAGE = s; imp.aplicados++; } else imp.ignora(F("idioma"));
+  }
+}
+
+/** Importa o fuso horário (só os da lista da /config) e o horário de verão. */
+void importaHora(Importacao& imp) {
+  long n;
+  if (imp.pega(F("fuso"))) {
+    bool ok = false;
+    if (leInteiro(imp.s, n)) for (uint8_t k = 0; k < FUSO_COUNT; k++) if (FUSOS[k].min == n) ok = true;
+    if (ok) { fusoMin = n; imp.aplicados++; } else imp.ignora(F("fuso"));
+  }
+  imp.simNao(F("verao"), horarioVerao);
+}
+
+/** Importa os ajustes do display: tela ligada, telas, tempos, brilho, noite e horário automático. */
+void importaDisplay(Importacao& imp) {
+  String& s = imp.s;
+  long n;
+  imp.simNao(F("telaLigada"), displayLigado);
+  if (imp.pega(F("telas"))) {
+    if (leInteiro(s, n) && n >= 1 && n <= 0x7F) { telasMask = n; imp.aplicados++; } else imp.ignora(F("telas"));
+  }
+  if (imp.pega(F("telaSeg"))) {
+    if (leInteiro(s, n) && n >= 5 && n <= 30 && n % 5 == 0) { telaSeg = n; imp.aplicados++; } else imp.ignora(F("telaSeg"));
+  }
+  if (imp.pega(F("telaMin"))) {
+    if (leInteiro(s, n) && (n == 0 || n == 1 || n == 5 || n == 10 || n == 15 || n == 30 || n == 60)) { telaTimeoutMin = n; imp.aplicados++; }
+    else imp.ignora(F("telaMin"));
+  }
+  if (imp.pega(F("brilho"))) {
+    if (leInteiro(s, n) && brilhoValido(n)) { brilhoPct = n; imp.aplicados++; } else imp.ignora(F("brilho"));
+  }
+  if (imp.pega(F("brilhoNoite"))) {
+    if (leInteiro(s, n) && brilhoValido(n)) { brilhoNoitePct = n; imp.aplicados++; } else imp.ignora(F("brilhoNoite"));
+  }
+  imp.simNao(F("noiteDiminui"), noiteDiminui);
+  imp.simNao(F("noitePeloSol"), noitePeloSol);
+
+  // Horário automático: liga/desliga antes dos horários (com a agenda ligada, eles não podem ser iguais)
+  imp.simNao(F("agenda"), agendaAtiva);
+  bool temLiga = imp.pega(F("agendaLiga"));
+  int liga = temLiga ? parseHora(s) : -1;
+  bool temDesliga = imp.pega(F("agendaDesliga"));
+  int desliga = temDesliga ? parseHora(s) : -1;
+  if (temLiga || temDesliga) {
+    if (liga >= 0 && desliga >= 0 && !(agendaAtiva && liga == desliga)) { agendaLiga = liga; agendaDesliga = desliga; imp.aplicados++; }
+    else imp.ignora(F("agenda (horários)"));
+  }
+}
+
+/** Importa bateria, sensor de energia, economia na bateria e LED de status. */
+void importaEnergia(Importacao& imp) {
+  long n;
+  imp.simNao(F("bateria"), bateriaAtiva);
+  imp.simNao(F("energia"), energiaAtiva);
+  imp.simNao(F("eco"), ecoBateria);
+  if (imp.pega(F("ecoIntervalo"))) {
+    if (leInteiro(imp.s, n) && ecoIntervaloValido(n)) { ecoIntervaloMin = n; imp.aplicados++; } else imp.ignora(F("ecoIntervalo"));
+  }
+
+  bool led = ledStatusAtivo;             // ledStatusAtivo é volatile (usado no Ticker): passa por uma cópia
+  imp.simNao(F("led"), led);
+  ledStatusAtivo = led;
+  imp.simNao(F("ledAgenda"), ledSegueAgenda);
+}
+
+/**
+ * Importa a URL do painel (em branco desliga o envio, como na /config) e a DEVICE_KEY (em branco
+ * mantém a atual). O ID do dispositivo nunca vem do arquivo: apiDeviceId continua o deste ESP.
+ */
+void importaPainel(Importacao& imp) {
+  String& s = imp.s;
+  if (imp.pega(F("painelUrl"))) {
+    bool ok = s.length() == 0 || ((s.startsWith("http://") || s.startsWith("https://")) && s.length() <= 120);
+    for (size_t k = 0; k < s.length(); k++) if (s[k] < 33 || s[k] > 126) ok = false;
+    if (ok) { apiUrl = s; imp.aplicados++; } else imp.ignora(F("painelUrl"));
+  }
+  if (imp.pega(F("painelChave")) && s.length()) {
+    bool ok = s.length() >= 8 && s.length() <= 64;
+    for (size_t k = 0; k < s.length(); k++) { char c = s[k]; if (c < 33 || c > 126 || c == '"' || c == '\\') ok = false; }
+    if (ok) { deviceKey = s; imp.aplicados++; } else imp.ignora(F("painelChave"));
+  }
+}
+
 /**
  * POST /importar: recebe o arquivo de backup (campo 'cfg', lido pelo navegador) e aplica cada ajuste
  * com as mesmas regras da /config. Campo ausente = mantém o atual; inválido = ignorado (e listado na
@@ -4490,17 +4707,18 @@ void handleImportar() {
   if (!requisicaoSegura()) return;      // recusa POST vindo de outro site (CSRF)
   if (!exigeLogin()) return;           // precisa estar logado (senha da /config)
 
-  LeitorBackup* b = new LeitorBackup();  // ~1 KB: no heap, não na pilha
+  Importacao imp;
+  imp.b = new LeitorBackup();            // ~1 KB: no heap, não na pilha
   {
     String corpo = server.arg(F("cfg"));
     JsonStreamingParser parser;
-    parser.setListener(b);
+    parser.setListener(imp.b);
     for (size_t k = 0; k < corpo.length(); k++) parser.parse(corpo[k]);
   }
 
-  int fi = b->busca(F("formato"));
-  if (fi < 0 || b->v[fi].toInt() != 1) {
-    delete b;
+  int fi = imp.b->busca(F("formato"));
+  if (fi < 0 || imp.b->v[fi].toInt() != 1) {
+    delete imp.b;
     server.send_P(400, PSTR("text/html; charset=utf-8"),
                 PSTR("<meta charset=\"utf-8\"><body style=\"font-family:system-ui,sans-serif;background:#07101e;color:#fff;padding:24px\">"
                 "<p>⚠️ Arquivo inválido: não é um backup da estação (ou é de uma versão mais nova). Nada foi alterado.</p>"
@@ -4508,130 +4726,23 @@ void handleImportar() {
     return;
   }
 
-  uint8_t aplicados = 0;
-  String ignorados = "";
-  String s;
-  bool sn;
-  long n;
-  auto pega = [&](const __FlashStringHelper* nome) -> bool { int i = b->busca(nome); if (i < 0) return false; s = b->v[i]; s.trim(); return true; };
-  auto ignora = [&](const __FlashStringHelper* nome) { if (ignorados.length()) ignorados += F(", "); ignorados += nome; };
-  // Liga/desliga: aplica se veio true/false
-  auto simNao = [&](const __FlashStringHelper* nome, bool& var) {
-    if (!pega(nome)) return;
-    if (leSimNao(s, sn)) { var = sn; aplicados++; } else ignora(nome);
-  };
-
-  // Chave do OpenWeatherMap (em branco = mantém a atual)
-  if (pega(F("owmChave")) && s.length()) {
-    bool ok = s.length() >= 20 && s.length() <= 40;
-    for (size_t k = 0; k < s.length(); k++) if (!isAlphaNumeric(s[k])) ok = false;
-    if (ok) { OPEN_WEATHER_MAP_APP_ID = s; aplicados++; } else ignora(F("owmChave"));
-  }
-
-  // Cidade: ID e/ou coordenadas, com as regras da /config (precisa de um dos dois)
-  bool temId = pega(F("cidadeId"));
-  String id = temId ? s : String("");
-  String latS = pega(F("lat")) ? s : String("");
-  String lonS = pega(F("lon")) ? s : String("");
-  if (temId || latS.length() || lonS.length()) {
-    bool idOk = id.length() <= 10;
-    for (size_t k = 0; k < id.length(); k++) if (!isDigit(id[k])) idOk = false;
-    float lat = 0, lon = 0;
-    int8_t okLat = parseCoord(latS, lat, -90, 90);
-    int8_t okLon = parseCoord(lonS, lon, -180, 180);
-    bool coordValida = okLat == 1 && okLon == 1;
-    bool coordErrada = okLat < 0 || okLon < 0 || (okLat == 0) != (okLon == 0);
-    if (!idOk || coordErrada || (id.length() == 0 && !coordValida)) ignora(F("cidade"));
-    else {
-      OPEN_WEATHER_MAP_LOCATION_ID = id;
-      coordOk = coordValida;             // sem coordenadas: o ESP descobre pelo ID na 1ª consulta
-      if (coordValida) { cidadeLat = lat; cidadeLon = lon; }
-      aplicados++;
-    }
-  }
-
-  if (pega(F("idioma"))) {
-    bool ok = false;
-    for (uint8_t k = 0; k < LANG_COUNT; k++) if (s.equals(LANG_CODES[k])) ok = true;
-    if (ok) { OPEN_WEATHER_MAP_LANGUAGE = s; aplicados++; } else ignora(F("idioma"));
-  }
-
-  // Data e hora
-  if (pega(F("fuso"))) {
-    bool ok = false;
-    if (leInteiro(s, n)) for (uint8_t k = 0; k < FUSO_COUNT; k++) if (FUSOS[k].min == n) ok = true;
-    if (ok) { fusoMin = n; aplicados++; } else ignora(F("fuso"));
-  }
-  simNao(F("verao"), horarioVerao);
-
-  // Display
-  simNao(F("telaLigada"), displayLigado);
-  if (pega(F("telas"))) {
-    if (leInteiro(s, n) && n >= 1 && n <= 0x7F) { telasMask = n; aplicados++; } else ignora(F("telas"));
-  }
-  if (pega(F("telaSeg"))) {
-    if (leInteiro(s, n) && n >= 5 && n <= 30 && n % 5 == 0) { telaSeg = n; aplicados++; } else ignora(F("telaSeg"));
-  }
-  if (pega(F("telaMin"))) {
-    if (leInteiro(s, n) && (n == 0 || n == 1 || n == 5 || n == 10 || n == 15 || n == 30 || n == 60)) { telaTimeoutMin = n; aplicados++; }
-    else ignora(F("telaMin"));
-  }
-  if (pega(F("brilho"))) {
-    if (leInteiro(s, n) && brilhoValido(n)) { brilhoPct = n; aplicados++; } else ignora(F("brilho"));
-  }
-  if (pega(F("brilhoNoite"))) {
-    if (leInteiro(s, n) && brilhoValido(n)) { brilhoNoitePct = n; aplicados++; } else ignora(F("brilhoNoite"));
-  }
-  simNao(F("noiteDiminui"), noiteDiminui);
-  simNao(F("noitePeloSol"), noitePeloSol);
-  simNao(F("agenda"), agendaAtiva);
-  bool temLiga = pega(F("agendaLiga"));
-  int liga = temLiga ? parseHora(s) : -1;
-  bool temDesliga = pega(F("agendaDesliga"));
-  int desliga = temDesliga ? parseHora(s) : -1;
-  if (temLiga || temDesliga) {
-    if (liga >= 0 && desliga >= 0 && !(agendaAtiva && liga == desliga)) { agendaLiga = liga; agendaDesliga = desliga; aplicados++; }
-    else ignora(F("agenda (horários)"));
-  }
-
-  // Bateria e energia
-  simNao(F("bateria"), bateriaAtiva);
-  simNao(F("energia"), energiaAtiva);
-  simNao(F("eco"), ecoBateria);
-  if (pega(F("ecoIntervalo"))) {
-    if (leInteiro(s, n) && ecoIntervaloValido(n)) { ecoIntervaloMin = n; aplicados++; } else ignora(F("ecoIntervalo"));
-  }
-
-  // LED de status
-  bool led = ledStatusAtivo;             // ledStatusAtivo é volatile (usado no Ticker): passa por uma cópia
-  simNao(F("led"), led);
-  ledStatusAtivo = led;
-  simNao(F("ledAgenda"), ledSegueAgenda);
-
-  // Painel web: URL em branco desliga o envio (como na /config); chave em branco mantém a atual
-  if (pega(F("painelUrl"))) {
-    bool ok = s.length() == 0 || ((s.startsWith("http://") || s.startsWith("https://")) && s.length() <= 120);
-    for (size_t k = 0; k < s.length(); k++) if (s[k] < 33 || s[k] > 126) ok = false;
-    if (ok) { apiUrl = s; aplicados++; } else ignora(F("painelUrl"));
-  }
-  if (pega(F("painelChave")) && s.length()) {
-    bool ok = s.length() >= 8 && s.length() <= 64;
-    for (size_t k = 0; k < s.length(); k++) { char c = s[k]; if (c < 33 || c > 126 || c == '"' || c == '\\') ok = false; }
-    if (ok) { deviceKey = s; aplicados++; } else ignora(F("painelChave"));
-  }
-  // ID do dispositivo: nunca vem do arquivo (apiDeviceId continua o deste ESP)
-  delete b;
+  importaClima(imp);
+  importaHora(imp);
+  importaDisplay(imp);
+  importaEnergia(imp);
+  importaPainel(imp);
+  delete imp.b;
 
   salvaConfig();
   String h;
   h.reserve(700);
   h = F("<meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"15;url=/config\">"
         "<body style=\"font-family:system-ui,sans-serif;background:#07101e;color:#fff;padding:24px;line-height:1.5\">"
-        "<p>✅ Configurações importadas: ") + String(aplicados) + (aplicados == 1 ? F(" ajuste aplicado.") : F(" ajustes aplicados.")) + F("</p>");
-  if (ignorados.length()) h += F("<p>⚠️ Ignorados (valor inválido, o atual foi mantido): ") + htmlEsc(ignorados) + F("</p>");
+        "<p>✅ Configurações importadas: ") + String(imp.aplicados) + (imp.aplicados == 1 ? F(" ajuste aplicado.") : F(" ajustes aplicados.")) + F("</p>");
+  if (imp.ignorados.length()) h += F("<p>⚠️ Ignorados (valor inválido, o atual foi mantido): ") + htmlEsc(imp.ignorados) + F("</p>");
   h += F("<p>O ID do dispositivo deste ESP foi mantido. Reiniciando... A página volta sozinha em uns 15 s.</p></body>");
   server.send(200, "text/html; charset=utf-8", h);
-  Serial.println(F("Backup importado: ") + String(aplicados) + F(" ajustes; ignorados: ") + ignorados);
+  Serial.println(F("Backup importado: ") + String(imp.aplicados) + F(" ajustes; ignorados: ") + imp.ignorados);
   delay(500);
   ESP.restart();
 }

@@ -84,7 +84,7 @@ static_assert(sizeof(PORTAL_SENHA) - 1 >= 8 && sizeof(PORTAL_SENHA) - 1 <= 63,
   #define DISPLAY_SDA      D2           // GPIO4
   #define DISPLAY_SCL      D1           // GPIO5 (se a tela ficar em branco, troque SDA e SCL)
   #define DHTPIN           14           // GPIO14 = D5 (a biblioteca DHT usa o número do GPIO)
-  #define DHTTYPE          DHT22        // DHT22 (AM2302); use DHT11 se for o sensor mais simples
+  #define SENSOR_TIPO      22           // 22 = DHT22 (AM2302); use 11 se for o DHT11 (mais simples); também aceita 12 ou 21
   #define PIN_BOTAO_TELA   D7           // GPIO13: clique = próxima tela; segurar = apagar o WiFi
   #define PIN_BOTAO_RESET  D6           // GPIO12: botão de reset geral (-1 desativa)
   #define PIN_ENERGIA      D0           // GPIO16: sensor de energia da placa UPS (-1 desativa); com o D0 aqui, o 2º LED do D0 não é usado
@@ -93,7 +93,7 @@ static_assert(sizeof(PORTAL_SENHA) - 1 >= 8 && sizeof(PORTAL_SENHA) - 1 <= 63,
   #define DISPLAY_SDA      D5           // GPIO14
   #define DISPLAY_SCL      D6           // GPIO12 (confirmado na prática; se a tela ficar em branco, troque SDA e SCL)
   #define DHTPIN           4            // GPIO4 = D2
-  #define DHTTYPE          DHT22        // troque para DHT11 se esse for o sensor ligado
+  #define SENSOR_TIPO      22           // troque para 11 (DHT11) se esse for o sensor ligado
   #define PIN_BOTAO_TELA   D7           // GPIO13
   #define PIN_BOTAO_RESET  D1           // GPIO5 (o D6 é o SCL do display)
   #define PIN_ENERGIA      D0           // GPIO16: sensor de energia da placa UPS (-1 desativa); com o D0 aqui, o 2º LED do D0 não é usado
@@ -113,7 +113,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "3.6"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.6.4"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "EstacaoMeteorologica-"   // nome na rede e na porta OTA: este prefixo + ID do chip (ex.: EstacaoMeteorologica-a1b2c3). Só letras, números e hífen; até 26 caracteres
 
 // ---- Hora da internet (NTP): até 3 servidores, usados na ordem se um não responder --------

@@ -221,11 +221,13 @@ Os pinos do display, do sensor e dos botões mudam sozinhos. Se a tela ficar em 
 
 ### Sensor DHT11 em vez de DHT22
 
-No bloco da sua placa (seção 2 do `EstacaoConfig.h`), troque apenas o tipo (a biblioteca é a mesma):
+No bloco da sua placa (seção 2 do `EstacaoConfig.h`), troque apenas o número do modelo (a biblioteca é a mesma). Aceita 11, 12, 21 ou 22; outro valor dá erro de compilação:
 
 ```cpp
-#define DHTTYPE DHT11
+#define SENSOR_TIPO      11           // 11 = DHT11, 12 = DHT12, 21 = DHT21, 22 = DHT22 (AM2302)
 ```
+
+O modelo é um número, e não `DHT11`/`DHT22`, porque na biblioteca DHT esses nomes são constantes de C++: o `#if` do pré-processador não as enxerga e trataria todos os modelos como iguais (o nome do sensor ficava sempre "DHT11" nas mensagens).
 
 O DHT11 mede em passos inteiros (a casa decimal ficará sempre zero), com precisão menor e só de 0 a 50 °C.
 
@@ -599,7 +601,7 @@ Todas as senhas e constantes ajustáveis ficam no `EstacaoConfig.h`. O `EstacaoM
 | `OWM_APP_ID_PADRAO` | Chave padrão do OpenWeatherMap (`""` = informar em `/config`) |
 | `DEVICE_KEY_PADRAO` | `DEVICE_KEY` padrão do painel (`""` = informar em `/config`) |
 | `PLACA_ESP8266_COMUM` / `PLACA_OLED_INTEGRADO` | **Escolhe a placa** (descomente só uma): define os pinos do display, do sensor e dos botões |
-| `DHTPIN`, `DHTTYPE` | Pino e modelo do sensor (`DHT22` ou `DHT11`), no bloco da placa |
+| `DHTPIN`, `SENSOR_TIPO` | Pino e modelo do sensor (`22` = DHT22, `11` = DHT11; também `12` ou `21`), no bloco da placa |
 | `DISPLAY_SDA`, `DISPLAY_SCL` | Pinos I2C do display, no bloco da placa |
 | `I2C_DISPLAY_ADDRESS` | Endereço do OLED (`0x3c`) |
 | `LED_STATUS_ATIVO` | Padrão de fábrica do LED de status (muda em `/config` → LED de status) |
@@ -684,7 +686,8 @@ O firmware é dividido em seções numeradas. As seções 2 e 3, junto com as se
 |---|---|
 | **Tela em branco** | Ligação SDA/SCL, endereço `0x3C`; troque `DISPLAY_SDA` e `DISPLAY_SCL` no bloco da placa. A varredura do I2C no Serial (115200) lista o que respondeu |
 | **LED pisca junto com a tela** | O display está no D4. Mude para D1/D2 (variante A) |
-| **Temperatura/umidade `--` ou erro de sensor** | Pino do dado, 3,3 V, resistor de 10 kΩ (DHT de 4 pinos), `DHTTYPE` correto |
+| **Temperatura/umidade `--` ou erro de sensor** | Pino do dado, 3,3 V, resistor de 10 kΩ (DHT de 4 pinos), `SENSOR_TIPO` correto |
+| **Erro "SENSOR_TIPO invalido"** | No bloco da placa do `EstacaoConfig.h`, use `11`, `12`, `21` ou `22`. Vindo de uma versão anterior, troque a linha `#define DHTTYPE DHT22` por `#define SENSOR_TIPO 22` |
 | **"Sem dados do clima"** | Chave e ID da cidade na seção Cidade e clima; chaves novas demoram a ativar |
 | **Não conecta ao WiFi** | Com uma rede salva, o ESP **não** abre o portal sozinho: ele segue sem WiFi (LED com piscada longa a cada 2 s) e reconecta quando a rede voltar. Se a rede mudou de nome ou de senha, segure o botão das telas por 8 s para apagar o WiFi e abrir o portal |
 | **"Pedido recusado: ele não veio da página desta estação"** | Proteção contra CSRF. Abra a página pelo IP do ESP (ou pelo nome dele na rede) e use os botões dela. Pedidos por `curl` sem os cabeçalhos `Origin`/`Referer` continuam funcionando |
@@ -752,6 +755,10 @@ EstacaoMeteorologica/
 | **3.4** | **Economia na bateria** em `/config` → Bateria e energia: sem energia externa (placa UPS), o WiFi entra em *light sleep* e fica acordado por 2 min após um acesso à página ou um clique; envio ao painel com intervalo próprio na bateria (15 a 60 min); envio, clima e OTA sem o sono; rota `/economia`; tela do envio pelo botão mostra "Conexão segura" (o texto antigo era cortado); botão **Reiniciar o ESP** em Sistema (rota `/reiniciar`) e o "‹ voltar" das seções como botão; nome "Estação Meteorológica" na abertura do OLED, no título da página e no rodapé da `/config` |
 | **3.5** | Nomes em português: arquivos `EstacaoConfig.h` (e `.example.h`), `EstacaoFontes.h` e `EstacaoImagens.h` (antes `WeatherStation*.h`); rede do portal de WiFi `EstacaoMeteorologica` (antes `ESP_WeatherStation`); nome na rede e na porta OTA `EstacaoMeteorologica-<chip>` (antes `WeatherStationESP8266-<chip>`); comentários traduzidos. O `device_id` continua `esp8266-<chip>`, para o painel manter o histórico |
 | **3.6** | **Backup das configurações** em `/config` → Sistema: **Exportar** baixa todos os ajustes num JSON (cidade, chave do OpenWeatherMap, idioma, fuso, telas, brilho, agenda, bateria, economia, LED, URL e `DEVICE_KEY` do painel); **Importar** confere o arquivo no navegador, aplica cada campo com as regras da `/config`, lista os ignorados, mantém o ID do dispositivo e reinicia. Rotas `/exportar` e `/importar`. Tela do **portal de WiFi** no OLED em português, com o nome da rede, a **senha do portal** e o endereço `192.168.4.1` |
+| **3.6.1** | Modelo do sensor por número (`SENSOR_TIPO` 11, 12, 21 ou 22, no lugar do `DHTTYPE`) no `EstacaoConfig.h`: corrige o nome do sensor, que aparecia sempre como "DHT11" na página, em Sistema e no Serial; valor inválido gera erro de compilação. Um único projeto para as duas placas (troca só a linha `PLACA_...`) |
+| **3.6.2** | Código reorganizado, sem mudar o funcionamento: `#include` com `<>` para bibliotecas e `""` só para os arquivos do projeto, agrupados por finalidade; `setup()` dividido em etapas do boot (`iniciaPinosESensor`, `iniciaDisplayBoot`, `conectaWiFiBoot`, `configuraOta`, `mostraResultadoWiFiBoot`, `iniciaInterfaceOled`, `iniciaServidorWeb`); importação do backup dividida por grupo (`importaClima`, `importaHora`, `importaDisplay`, `importaEnergia`, `importaPainel`); funções do exemplo original renomeadas para o português (`atualizaClima`, `desenhaDataHora`, `desenhaClimaAtual`, `desenhaPrevisao`, `desenhaBarraInferior`, `qualidadeSinal` e outras); utilitários e busca de cidade em seções próprias; mapa do arquivo atualizado |
+| **3.6.3** | Limpeza dos avisos de compilação, sem mudar o funcionamento: `BuscaCidade` e `LeitorBackup` marcadas como `final` (aviso do destrutor não virtual); parâmetros não usados sem nome (`c` em `whitespace`, `state` nas telas); textos de hora e data com buffers e tipos que o compilador consegue medir (`-Wformat-truncation`); idioma gravado na EEPROM com `toCharArray` |
+| **3.6.4** | Tela de abertura: placa e versão em duas linhas ("ESP8266" e "v3.6.4"); numa linha só o texto passava da tela e a versão aparecia cortada |
 
 ---
 
