@@ -113,7 +113,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "3.11.0"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.11.1"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "EstacaoMeteorologica-"   // nome na rede e na porta OTA: este prefixo + ID do chip (ex.: EstacaoMeteorologica-a1b2c3). Só letras, números e hífen; até 26 caracteres
 
 // ---- Hora da internet (NTP): até 3 servidores, usados na ordem se um não responder --------

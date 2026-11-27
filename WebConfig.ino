@@ -376,7 +376,7 @@ String secaoResumo(uint8_t k) {
   }
   if (id.equals(F("wifi"))) {
     if (WiFi.status() != WL_CONNECTED) return F("⚠️ desconectado");
-    return htmlEsc(WiFi.SSID()) + F(" · ") + String(WiFi.RSSI()) + F(" dBm");
+    return htmlEsc(WiFi.SSID()) + F(" · sinal ") + String(qualidadeSinal(WiFi.RSSI())) + F("%");   // dBm fica na seção WiFi
   }
   if (id.equals(F("led"))) {
     if (!ledStatusAtivo) return F("desligado");

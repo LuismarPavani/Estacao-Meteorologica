@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-3.11.0-success)
+![Versão](https://img.shields.io/badge/firmware-3.11.1-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -811,6 +811,7 @@ EstacaoMeteorologica/
 | **3.9.0** | **Registro de eventos** em `/config` → Registro: os últimos eventos (ligar e motivo do reinício, WiFi, clima, envio ao painel com o código HTTP, energia externa, faixa da bateria, falha do sensor, login, ajustes salvos ou recusados, tela pela página e OTA), com hora, os mais novos em cima; atualiza a cada 2 s, com Pausar, Baixar .txt e Limpar. Fica num anel fixo na RAM (`LOG_BYTES`, padrão 1 KB = 21 eventos) e começa vazio a cada boot; `LOG_WEB 0` no `EstacaoConfig.h` desliga sem ocupar memória. Rotas `/log.json` e `/log/limpar` (com login). Nova aba `Registro.ino` |
 | **3.10.0** | Seção **Sistema** reorganizada em 4 grupos (Funcionamento, Memória, Hardware, Software). Memória com **barras coloridas** (verde, amarelo, vermelho): programa usado, memória livre (em relação à do início do boot), maior bloco livre (em vezes o que o HTTPS precisa) e fragmentação. ✅/⚠️ no último reinício (⚠️ depois de travar), na hora, no sensor e na flash (chip e IDE numa linha, ⚠️ se forem diferentes). Coordenadas com link para o mapa, tempo ligado mais curto (`2 d 3 h`) e botão **Copiar diagnóstico** |
 | **3.11.0** | Seção **Sistema** se atualiza sozinha a cada 5 s enquanto está aberta (tempo ligado, hora, sensor e as 4 barras de memória), com **Pausar** e "Atualizado às ..."; busca só as linhas que mudam (rota `/sistema.json`, com login, ~1,5 KB) e para quando a aba fica em segundo plano |
+| **3.11.1** | Menu da `/config`: o resumo do WiFi mostra o sinal em % (`Luis_Gabi · sinal 96%`) no lugar do dBm; o dBm continua na seção WiFi |
 
 ---
 
