@@ -197,6 +197,7 @@ String msgConfig(const String& r, bool& erro) {
   else if (r.equals(F("apikey"))) m = F("⚠️ DEVICE_KEY inválida: use de 8 a 64 caracteres, sem espaços.");
   else if (r.equals(F("envio_ok"))) m = F("✅ Dados enviados ao painel.");
   else if (r.equals(F("envio_erro"))) m = String(F("⚠️ Falha no envio: ")) + htmlEsc(apiUltimoMsg);
+  else if (r.equals(F("log_limpo"))) m = F("✅ Registro apagado.");
   erro = m.startsWith("⚠️");
   return m;
 }
@@ -237,6 +238,13 @@ String secaoResumo(uint8_t k) {
     if (!ledStatusAtivo) return F("desligado");
     return ledSegueAgenda ? F("ligado · segue o horário da tela") : F("ligado");
   }
+#if LOG_WEB
+  if (id.equals(F("log"))) {
+    if (logCount == 0) return F("nenhum evento ainda");
+    return String(logCount) + (logCount == 1 ? F(" evento") : F(" eventos")) + F(" · último há ") +
+           tempoCurto((millis() - logUltimoMs) / 1000UL);
+  }
+#endif
   return F("v" FIRMWARE_VERSAO " · ligado há ") + tempoCurto(millis() / 1000UL);   // sistema
 }
 
@@ -625,5 +633,8 @@ void paginaConfig() {
   else if (s.equals(F("wifi"))) cfgWiFi(r);
   else if (s.equals(F("led"))) cfgLed(r);
   else if (s.equals(F("sistema"))) cfgSistema(r);
+#if LOG_WEB
+  else if (s.equals(F("log"))) cfgLog(r);
+#endif
   else cfgMenu(r);
 }

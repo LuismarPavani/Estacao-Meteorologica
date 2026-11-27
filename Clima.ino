@@ -30,6 +30,7 @@ void atualizaClima(OLEDDisplay *display) {
 
   if (OPEN_WEATHER_MAP_APP_ID.length() == 0) {
     Serial.println(F("Sem chave da API: configure em /config"));
+    if (noBoot) logEvento(F("Clima: falta a chave da API"));   // só uma vez (a nova tentativa é a cada 1 min)
     if (noBoot) {                        // no boot, avisa no OLED em vez de deixar a tela preta
       display->clear();
       display->setTextAlignment(TEXT_ALIGN_CENTER);
@@ -47,6 +48,7 @@ void atualizaClima(OLEDDisplay *display) {
 
   if (!coordOk && OPEN_WEATHER_MAP_LOCATION_ID.length() == 0) {   // sem coordenadas e sem ID: não há o que consultar
     Serial.println(F("Sem cidade: informe em /config → Clima"));
+    if (noBoot) logEvento(F("Clima: falta informar a cidade"));
     weatherOk = false;
     nextWeatherUpdate = millis() + RETRY_INTERVAL_MS;
     return;
@@ -82,6 +84,8 @@ void atualizaClima(OLEDDisplay *display) {
     Serial.println(F("Previsão: memória insuficiente para os blocos"));
   }
 
+  if (weatherOk) logEvento(F("Clima: ") + currentWeather.cityName + F(", ") + String(currentWeather.temp, 0) + F(" °C"));
+  else logEvento(F("Clima: falha na consulta"));
   if (weatherOk) climaRecebido = true;
   else if (climaRecebido) currentWeather.cityName = cidadeAnterior;   // falhou: o OLED segue com os últimos dados bons
   desenhaProgresso(display, 100, weatherOk ? F("Pronto...") : F("Falha ao obter o clima"));

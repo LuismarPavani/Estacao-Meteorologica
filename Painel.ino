@@ -150,6 +150,9 @@ bool enviaParaApi() {
   ledEnviando = true;
   bool ok = enviaParaApiInterno();
   ledEnviando = false;
+  String ev = F("Painel: ") + apiUltimoMsg;   // ex.: "Painel: HTTP 200 (1.6 s)" ou o motivo da falha
+  if (apiUltimoDurMs > 0) ev += F(" (") + String(apiUltimoDurMs / 1000.0f, 1) + F(" s)");
+  logEvento(ev);
   if (ok) ledPulsoOk(); else ledPulsoFalha();
   return ok;
 }

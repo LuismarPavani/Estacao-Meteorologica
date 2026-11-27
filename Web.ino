@@ -124,6 +124,8 @@ void redirecionaConfig(const char* r) {
   else if (String(FPSTR(HORA_COD)).indexOf(chave) >= 0) secao = F("hora");
   else if (String(FPSTR(BATERIA_COD)).indexOf(chave) >= 0) secao = F("bateria");
   else if (!strcmp_P(r, PSTR("led"))) secao = F("led");
+  else if (!strcmp_P(r, PSTR("log_limpo"))) secao = F("log");
+  logAjuste(r);                         // registro de eventos: "Ajuste: Brilho salvo." etc.
   server.sendHeader(F("Location"), String(F("/config?s=")) + secao + F("&r=") + r);
   server.send(303, "text/plain", "");
 }
@@ -308,11 +310,13 @@ void handleLogin() {
     if (loginFalhas < 255) loginFalhas++;
     if (loginFalhas >= 5) loginLiberaEm = ms + 60000UL;
     Serial.println(F("Login da /config: senha incorreta"));
+    logEvento(F("Login: senha errada (") + server.client().remoteIP().toString() + F(")"));
     server.sendHeader(F("Location"), F("/login?r=erro"));
     server.send(303, "text/plain", "");
     return;
   }
   loginFalhas = 0;
+  logEvento(F("Login na /config (") + server.client().remoteIP().toString() + F(")"));
   if (!sessaoSalOk) geraSalSessao();    // 1º login: sorteia o sal (com o WiFi ligado)
   server.sendHeader(F("Set-Cookie"), F("ws_sessao=") + tokenSessao() + F("; Max-Age=") + String((unsigned long)LOGIN_DIAS * 86400UL) +
                                   F("; Path=/; HttpOnly; SameSite=Lax"));

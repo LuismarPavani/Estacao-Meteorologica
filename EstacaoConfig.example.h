@@ -113,7 +113,7 @@ const int SDC_PIN = DISPLAY_SCL;
 // ==========================================================================================
 
 // ---- Identificação ------------------------------------------------------------------------
-#define FIRMWARE_VERSAO "3.8.1"           // enviado ao painel no campo "firmware"
+#define FIRMWARE_VERSAO "3.9.0"           // enviado ao painel no campo "firmware"
 #define HOSTNAME "EstacaoMeteorologica-"   // nome na rede e na porta OTA: este prefixo + ID do chip (ex.: EstacaoMeteorologica-a1b2c3). Só letras, números e hífen; até 26 caracteres
 
 // ---- Hora da internet (NTP): até 3 servidores, usados na ordem se um não responder --------
@@ -210,3 +210,7 @@ const unsigned long ECO_LOOP_MS     = 100;   // pausa do loop com a tela apagada
 // ---- Histórico interno (144 pontos x 5 min = 12 h, guardado em anel na RAM) ---------------
 const uint8_t HIST_SIZE = 144;
 const unsigned long HIST_INTERVAL_MS = 5UL * 60UL * 1000UL;
+
+// ---- Registro de eventos (/config → Registro): últimos eventos na RAM (somem ao reiniciar) --
+#define LOG_WEB   1                     // 1 = liga o registro; 0 = desliga (não ocupa RAM nem flash)
+#define LOG_BYTES 1024                  // RAM do registro: 1024 = ~21 eventos; 2048 = ~42 (cada KB a mais sai do heap livre)

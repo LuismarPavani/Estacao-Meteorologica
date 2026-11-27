@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-3.8.1-success)
+![Versão](https://img.shields.io/badge/firmware-3.9.0-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -375,6 +375,24 @@ O controlador do OLED tem uma faixa de brilho limitada: mesmo em 5% a tela conti
 
 **Agenda da tela:** o botão manual vale até o próximo horário programado. A agenda depende da hora da internet (NTP), então só age depois de sincronizar.
 
+### Registro de eventos
+
+Em `/config` → **Registro** aparecem os últimos eventos da estação, com a hora, os mais novos em cima, como no log de um roteador:
+
+```
+14:32:05   OK     Painel: HTTP 200 (1.6 s)
+14:30:00   INFO   Clima: São Paulo, 24 °C
+14:10:44   ERRO   WiFi caiu
+14:02:11   INFO   WiFi: MinhaRede · 192.168.12.2
++00:00:00  INFO   Ligado (v3.9.0): Software/System restart
+```
+
+- Entram só os **eventos**: ligar (com o motivo do reinício), WiFi conectado, caiu ou voltou, clima atualizado ou com falha, envio ao painel (código HTTP e tempo), energia externa caiu ou voltou, bateria baixa, crítica ou normal de novo, falha e volta do sensor, login certo ou errado (com o IP), ajustes salvos ou recusados, tela ligada ou apagada pela página e OTA. O monitor serial pela USB continua com todas as mensagens.
+- Cada evento tem uma etiqueta colorida: **OK** (verde: envio com HTTP 2xx, algo que voltou, login, ajuste salvo), **INFO** (cinza), **AVISO** (amarelo: bateria baixa, rodando na bateria, falta a chave ou a cidade, reinício depois de travar) e **ERRO** (vermelho: falhas, WiFi caiu, senha errada, ajuste recusado, bateria crítica). A lista fica numa caixa no estilo console, com rolagem própria.
+- Antes de a hora da internet chegar, a hora aparece como tempo desde que ligou (`+00:00:04`).
+- A página se atualiza a cada 2 s. **Pausar** congela a lista, **Baixar .txt** salva o que está na tela e **Limpar** apaga o registro.
+- Fica na RAM: com `LOG_BYTES 1024` (padrão) cabem 21 eventos, e os mais antigos saem quando enche. Ao reiniciar, começa vazio. `LOG_BYTES 2048` guarda 42 eventos, mas tira mais 1 KB do heap livre (confira a memória em Sistema; o HTTPS precisa de 12,5 KB livres).
+- `#define LOG_WEB 0` no `EstacaoConfig.h` desliga o registro: o item some do menu e não ocupa RAM nem flash.
 ### Backup das configurações
 
 Em `/config` → Sistema → **Backup das configurações**:
@@ -530,6 +548,8 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | GET | `/json` | Dados atuais (interno, externo, previsão, WiFi, bateria, estado da tela) |
 | GET | `/historico` | Histórico interno (arrays de temperatura e umidade) |
 | GET | `/sobre` | Página Sobre: versão, placa, sensor, resumo do projeto e links do GitHub e do painel (sem senha) |
+| GET | `/log.json` | Registro de eventos, do mais novo para o mais antigo (com login) |
+| POST | `/log/limpar` | Apaga o registro de eventos (com login) |
 | GET | `/config` e `/config?s=clima\|display\|hora\|bateria\|painel\|wifi\|led\|sistema` | Menu das configurações e cada seção (pede login) |
 | GET | `/login` | Página de login da configuração |
 | POST | `/login` | Confere a senha (`senha`) e grava o cookie de login por `LOGIN_DIAS` dias |
@@ -666,6 +686,7 @@ O firmware é dividido em seções numeradas e em abas. As seções 2 e 3, junto
 | `WebConfig.ino` | Página `/config` (seções e tabelas) | Quase igual |
 | `WebAcoes.ino` | Busca de cidade (GET) e ações (POST) | Quase igual |
 | `Backup.ino` | Backup das configurações (exportar e importar) | Igual |
+| `Registro.ino` | Registro de eventos (`/config` → Registro) | Igual |
 
 **Trocar de placa** é só mudar uma linha na seção 2 do `EstacaoConfig.h`:
 
@@ -737,6 +758,7 @@ O firmware é dividido em seções numeradas e em abas. As seções 2 e 3, junto
 EstacaoMeteorologica/
 ├── EstacaoMeteorologica.ino    # aba principal: bibliotecas, tipos, globais, tabelas, setup e loop
 ├── Backup.ino            # aba: exportar e importar as configurações
+├── Registro.ino          # aba: registro de eventos (/config → Registro)
 ├── Clima.ino             # aba: clima do OpenWeatherMap
 ├── Config.ino            # aba: configuração salva (EEPROM) e fuso
 ├── Painel.ino            # aba: envio ao painel web
@@ -785,6 +807,7 @@ EstacaoMeteorologica/
 | **3.7.0** | Código dividido em abas da Arduino IDE, sem mudar o funcionamento: a aba principal (`EstacaoMeteorologica.ino`) fica com bibliotecas, tipos, globais, protótipos, tabelas, `setup` e `loop`; as funções vão para `Config`, `Placa`, `Clima`, `Tela`, `Painel`, `Web`, `WebConfig`, `WebAcoes` e `Backup`. As abas `Tela` e `Placa` juntam o que muda no porte para ESP32. Ao atualizar uma pasta antiga, apague o `EstacaoMeteorologica.ino` antigo antes de copiar os novos |
 | **3.8.0** | Página **Sobre** (`/sobre`, sem senha): versão, placa e sensor deste aparelho, resumo do projeto, links do GitHub (firmware, painel e perfil), do manual e do painel online, e os créditos. Acesso pelo link **Sobre a estação** no rodapé da página principal e pelo item **Sobre** no menu da `/config`; o "‹ voltar" volta para a página de onde veio |
 | **3.8.1** | Correção: a tela podia começar o boot **apagada** (sem abertura e sem a tela do WiFi) e só acender já no relógio. Quando ela apagava pelo tempo de tela ligada ou pela agenda e depois algum ajuste era salvo (ou as coordenadas da cidade chegavam), o estado "apagada" ia para a EEPROM. Agora só a escolha manual (botão de ligar/apagar da página ou backup) é gravada. O boot **sempre** mostra a abertura, a conexão ao WiFi e o IP; se a tela foi apagada pela página, ela apaga no fim do boot |
+| **3.9.0** | **Registro de eventos** em `/config` → Registro: os últimos eventos (ligar e motivo do reinício, WiFi, clima, envio ao painel com o código HTTP, energia externa, faixa da bateria, falha do sensor, login, ajustes salvos ou recusados, tela pela página e OTA), com hora, os mais novos em cima; atualiza a cada 2 s, com Pausar, Baixar .txt e Limpar. Fica num anel fixo na RAM (`LOG_BYTES`, padrão 1 KB = 21 eventos) e começa vazio a cada boot; `LOG_WEB 0` no `EstacaoConfig.h` desliga sem ocupar memória. Rotas `/log.json` e `/log/limpar` (com login). Nova aba `Registro.ino` |
 
 ---
 

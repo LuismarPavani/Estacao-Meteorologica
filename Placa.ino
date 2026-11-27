@@ -241,12 +241,23 @@ String nomePino(int gpio) {
  * Registra se a última tentativa deu certo (sensorUltimaOk). Chamada a cada SENSOR_INTERVAL_MS.
  */
 void leSensor() {
+  static bool sensorFalhaLog = false;   // a falha já foi para o registro de eventos
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(h) || isnan(t)) {
     Serial.println(F("Falhou a leitura do sensor " SENSOR_NOME "!"));
+    // Registro: só a mudança (o sensor é lido a cada 10 s). Logo depois de ligar o DHT ainda pode
+    // falhar uma vez sem defeito, por isso só conta depois da 1ª leitura boa ou de 30 s ligado.
+    if (!sensorFalhaLog && (sensorOk || millis() > 30000UL)) {
+      logEvento(F("Sensor " SENSOR_NOME ": falha na leitura"));
+      sensorFalhaLog = true;
+    }
     sensorUltimaOk = false;             // o painel é avisado pelo campo sensor_ok
     return;                             // mantém o último valor válido
+  }
+  if (sensorFalhaLog) {
+    logEvento(F("Sensor " SENSOR_NOME ": voltou a ler"));
+    sensorFalhaLog = false;
   }
   localTemp = t;
   localHum = h;
@@ -305,6 +316,23 @@ void atualizaBateria() {
   float v = lerTensaoBateria();
   bateriaV = (bateriaV == 0) ? v : (bateriaV * 0.9f + v * 0.1f);   // média móvel: evita saltos
   bateriaPct = bateriaPercentual(bateriaV);
+
+#if LOG_WEB
+  // Registro: só quando a faixa muda (normal, baixa, crítica)
+  static int8_t faixaAnterior = -1;
+  int8_t faixa = bateriaPct <= BAT_CRITICA_PCT ? 2 : (bateriaPct <= BAT_AVISO_PCT ? 1 : 0);
+  if (faixaAnterior > faixa) {          // melhorou: só aceita com 3% de folga (não fica indo e voltando no limite)
+    int limite = (faixaAnterior == 2) ? BAT_CRITICA_PCT : BAT_AVISO_PCT;
+    if (bateriaPct <= limite + 3) faixa = faixaAnterior;
+  }
+  if (faixa != faixaAnterior && (faixaAnterior >= 0 || faixa > 0)) {
+    String s = String(bateriaPct) + F("% (") + String(bateriaV, 2) + F(" V)");
+    if (faixa == 2) logEvento(F("Bateria crítica: ") + s);
+    else if (faixa == 1) logEvento(F("Bateria baixa: ") + s);
+    else logEvento(F("Bateria normal: ") + s);
+  }
+  faixaAnterior = faixa;
+#endif
 }
 
 /** Texto descritivo da faixa de tensão da bateria (mostrado na seção Bateria e energia). */
@@ -355,6 +383,7 @@ void atualizaEnergia(unsigned long ms) {
   if (energiaContagem >= 3 && presente != energiaExterna) {
     energiaExterna = presente;
     Serial.println(presente ? F("Energia externa conectada (5 V)") : F("Sem energia externa: rodando na bateria"));
+    logEvento(presente ? F("Energia: voltou a energia externa") : F("Energia: caiu, rodando na bateria"));
   }
 }
 

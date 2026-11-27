@@ -48,6 +48,7 @@ See more at https://thingpulse.com
  *   WebConfig.ino  página /config (seções e tabelas)
  *   WebAcoes.ino   busca de cidade (GET) e ações (POST)
  *   Backup.ino     backup das configurações (exportar e importar)
+ *   Registro.ino   registro de eventos (/config → Registro, LOG_WEB no EstacaoConfig.h)
  *
  * Globais, tipos, tabelas e protótipos ficam neste arquivo, para valer em todas as abas.
  *
@@ -127,6 +128,14 @@ See more at https://thingpulse.com
   #define SENSOR_NOME "DHT22"
 #else
   #error "SENSOR_TIPO invalido: use 11, 12, 21 ou 22"
+#endif
+
+// Registro de eventos: padrões para um EstacaoConfig.h antigo, sem as linhas LOG_*
+#ifndef LOG_WEB
+  #define LOG_WEB 1
+#endif
+#ifndef LOG_BYTES
+  #define LOG_BYTES 1024
 #endif
 
 // ==========================================================================================
@@ -429,6 +438,23 @@ bool btnLido[2] = {false, false};       // última leitura bruta
 unsigned long btnMudou[2] = {0, 0};     // quando a leitura bruta mudou (debounce)
 unsigned long btnDesde[2] = {0, 0};     // quando o botão foi pressionado
 
+// ---- Registro de eventos (/config → Registro): anel fixo na RAM, perdido ao reiniciar -------
+#if LOG_WEB
+struct LogEntrada {
+  int32_t quando;                       // > 0: hora da internet (epoch); <= 0: -(segundos desde que ligou) - 1
+  char txt[44];                         // até 43 bytes de texto (UTF-8, cortado sem quebrar acentos)
+};
+static const uint8_t LOG_LINHAS = LOG_BYTES / sizeof(LogEntrada);   // 1024 bytes = 21 eventos
+static_assert(LOG_LINHAS >= 4 && LOG_BYTES / sizeof(LogEntrada) <= 255, "LOG_BYTES: use de 192 a 12000");
+LogEntrada logBuf[LOG_LINHAS];
+uint8_t logHead = 0;                    // próxima posição a gravar
+uint8_t logCount = 0;                   // eventos guardados (até LOG_LINHAS)
+uint32_t logTotal = 0;                  // eventos desde que ligou (inclusive os que já saíram do anel)
+unsigned long logUltimoMs = 0;          // millis() do último evento
+#else
+#define logEvento(x) do {} while (0)    // registro desligado: as chamadas somem na compilação
+#endif
+
 // ==========================================================================================
 //  6. PROTÓTIPOS DAS FUNÇÕES
 //  Declaradas aqui para que a ordem das funções abaixo não importe.
@@ -651,6 +677,19 @@ void importaEnergia(Importacao& imp);
 void importaPainel(Importacao& imp);
 void handleImportar();
 
+// ---- REGISTRO DE EVENTOS (/config → Registro) ---------------------------------------------
+#if LOG_WEB
+void logEvento(const String& msg);
+String logHora(int32_t quando);
+char logNivel(const char* txt);
+void paginaLogJson();
+void handleLogLimpar();
+void cfgLog(const String& r);
+void logAjuste(const char* r);
+#else
+#define logAjuste(x) do {} while (0)
+#endif
+
 // ==========================================================================================
 //  7. TABELAS
 // ==========================================================================================
@@ -794,6 +833,12 @@ static const char SEC_ID_7[] PROGMEM = "sistema";
 static const char SEC_NOME_7[] PROGMEM = "Sistema";
 static const char SEC_ICONE_7[] PROGMEM = "⚙️";
 static const char SEC_COR_7[] PROGMEM = "#78909c";
+#if LOG_WEB
+static const char SEC_ID_8[] PROGMEM = "log";
+static const char SEC_NOME_8[] PROGMEM = "Registro";
+static const char SEC_ICONE_8[] PROGMEM = "🧾";
+static const char SEC_COR_8[] PROGMEM = "#4db6ac";
+#endif
 static const SecaoCfg SECOES[] = {   // textos na flash: use FPSTR(SECOES[k].campo)
   {SEC_ID_0, SEC_NOME_0, SEC_ICONE_0, SEC_COR_0},
   {SEC_ID_1, SEC_NOME_1, SEC_ICONE_1, SEC_COR_1},
@@ -803,6 +848,9 @@ static const SecaoCfg SECOES[] = {   // textos na flash: use FPSTR(SECOES[k].cam
   {SEC_ID_5, SEC_NOME_5, SEC_ICONE_5, SEC_COR_5},
   {SEC_ID_6, SEC_NOME_6, SEC_ICONE_6, SEC_COR_6},
   {SEC_ID_7, SEC_NOME_7, SEC_ICONE_7, SEC_COR_7},
+#if LOG_WEB
+  {SEC_ID_8, SEC_NOME_8, SEC_ICONE_8, SEC_COR_8},   // último grupo, junto de LED e Sistema
+#endif
 };
 static const uint8_t SECOES_TOTAL = sizeof(SECOES) / sizeof(SECOES[0]);
 
@@ -850,6 +898,49 @@ input.sw:checked{background:#66bb6a}input.sw:checked::after{left:23px}
 .msg{border-radius:12px;padding:11px 14px;margin:0 0 18px;background:#66bb6a33}.msg.err{background:#ffb74d33}
 .pe{text-align:center;color:#ffffff55;font-size:.75rem;margin-top:8px}
 </style>)rawliteral";
+
+// ---- /config → Registro: lista de eventos que se atualiza sozinha (dados de /log.json) ------
+#if LOG_WEB
+static const char LOG_HTML[] PROGMEM = R"rawliteral(
+<style>.con{display:grid;grid-template-columns:auto auto 1fr;gap:3px 10px;align-items:baseline;background:#04080e;
+border:1px solid #ffffff1f;border-radius:12px;padding:12px 14px;margin:0 0 20px;max-height:62vh;overflow:auto;
+font:.78rem/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ln{display:contents}.con .hr{color:#6f8396;white-space:nowrap}.con .tx{color:#dfe7ee;word-break:break-word}
+.nv{font-weight:700;letter-spacing:.03em}.nv.o{color:#66bb6a}.nv.i{color:#90a4ae}.nv.a{color:#ffb74d}.nv.e{color:#ef5350}
+.con .vz{grid-column:1/-1;color:#6f8396}
+.bts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.bts form{margin:0}
+.mini.sec{background:#ffffff1a;color:#fff}.mini.red{background:#ef5350;color:#fff}</style>
+<div class="bts"><button class="mini" type="button" id="bp" onclick="pausar()">⏸ Pausar</button>
+<button class="mini sec" type="button" onclick="baixar()">⬇ Baixar .txt</button>
+<form method="POST" action="/log/limpar" onsubmit="return confirm('Apagar o registro?')"><button class="mini red" type="submit">🗑 Limpar</button></form></div>
+)rawliteral";
+// Depois da lista (montada pelo ESP em cfgLog): avisos e o script que atualiza a cada 2 s.
+// ATENÇÃO: no script, as funções são 'const nome=()=>{...}'. Uma linha que comece com
+// 'function nome(){' (sem parâmetros) é lida como C++ pela IDE do Arduino, que gera um protótipo
+// e o enfia, com uma linha '#line', DENTRO deste texto: o script quebra no navegador.
+static const char LOG_HTML_FIM[] PROGMEM = R"rawliteral(
+<div class="note" id="lgst">Atualiza sozinho a cada 2 s.</div>
+<div class="note">Guarda só os eventos (ligar, WiFi, clima, envio ao painel, energia, bateria, sensor, login e ajustes), os mais novos em cima. Fica na memória: ao reiniciar, começa vazio. O monitor serial pela USB continua com todas as mensagens.</div>
+<script>
+let pausa=false,dados=[];const L=document.getElementById('lg'),E=document.getElementById('lgst');
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const N={O:['o','OK'],I:['i','INFO'],A:['a','AVISO'],E:['e','ERRO']};
+const nv=x=>N[x[1]]||N.I;
+const linha=x=>'<div class="ln"><span class="hr">'+esc(x[0])+'</span><span class="nv '+nv(x)[0]+'">'+nv(x)[1]+'</span><span class="tx">'+esc(x[2])+'</span></div>';
+const mostra=()=>{L.innerHTML=dados.length?dados.map(linha).join(''):'<div class="ln"><span class="vz">Nenhum evento ainda.</span></div>'};
+let ocupado=false;
+const busca=async()=>{if(pausa||ocupado)return;ocupado=true;const ac=new AbortController(),to=setTimeout(()=>ac.abort(),6000);
+try{const r=await fetch('/log.json',{cache:'no-store',signal:ac.signal});if(!r.ok)throw new Error('HTTP '+r.status);
+const tx=await r.text();let j;try{j=JSON.parse(tx)}catch(e){throw new Error(tx.indexOf('<')>=0?'login expirou: recarregue a página':'resposta inválida ('+tx.length+' bytes)')}
+dados=j.l||[];mostra();E.textContent=j.total+(j.total==1?' evento':' eventos')+' desde que ligou · mostrando '+dados.length+' de até '+j.max}
+catch(e){E.textContent='⚠️ Não consegui ler o registro: '+(e.name=='AbortError'?'o ESP não respondeu em 6 s':e.message)}
+finally{clearTimeout(to);ocupado=false}};
+const pausar=()=>{pausa=!pausa;document.getElementById('bp').textContent=pausa?'▶ Continuar':'⏸ Pausar';if(!pausa)busca()};
+const baixar=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([dados.map(x=>x[0].padEnd(15)+nv(x)[1].padEnd(6)+x[2]).join('\r\n')+'\r\n'],{type:'text/plain;charset=utf-8'}));a.download='registro-estacao.txt';a.click()};
+busca();setInterval(busca,2000);
+</script>
+)rawliteral";
+#endif
 
 // ---- Página /sobre (texto fixo na flash; a parte "Este aparelho" é montada em paginaSobre) -----
 // Resumo do projeto e links. O manual completo é o README no GitHub (sempre atualizado).
@@ -1123,6 +1214,7 @@ void setup() {
 
   EEPROM.begin(sizeof(Config));
   carregaConfig();
+  logEvento(F("Ligado (v" FIRMWARE_VERSAO "): ") + ESP.getResetReason());
   displayLigado = true;                 // o boot sempre aparece (abertura, WiFi e IP): mostra que deu tudo certo.
                                         // A escolha salva (displayLigadoSalvo) vale no fim do setup().
 
@@ -1231,7 +1323,11 @@ void conectaWiFiBoot(const String& hostname) {
 void configuraOta(const String& hostname) {
   ArduinoOTA.setHostname(hostname.c_str());
   ArduinoOTA.setPassword(OTA_SENHA);   // senha definida em EstacaoConfig.h
-  ArduinoOTA.onStart([]() { ecoAcorda(10UL * 60UL * 1000UL); });   // gravação pelo WiFi sem light sleep (economia na bateria)
+  ArduinoOTA.onStart([]() {
+    ecoAcorda(10UL * 60UL * 1000UL);    // gravação pelo WiFi sem light sleep (economia na bateria)
+    logEvento(F("OTA: gravando firmware novo"));
+  });
+  ArduinoOTA.onError([](ota_error_t erro) { (void)erro; logEvento(F("OTA: falhou (erro ") + String((int)erro) + F(")")); });
 }
 
 /** Boot: com WiFi, inicia o OTA e mostra a tela 'WiFi conectado'; sem WiFi, avisa que segue sem rede. */
@@ -1239,6 +1335,7 @@ void mostraResultadoWiFiBoot() {
   if (WiFi.status() == WL_CONNECTED) {
     ledRede = LED_NORMAL;               // conectou
     ledPulsoOk();
+    logEvento(F("WiFi: ") + WiFi.SSID() + F(" · ") + WiFi.localIP().toString());
     iniciaOta();
     if (displayLigado) {                // tela 'WiFi conectado': rede, sinal e IP (útil se a tela do WiFi estiver desmarcada)
       desenhaTelaIp();
@@ -1248,6 +1345,7 @@ void mostraResultadoWiFiBoot() {
   } else {
     ledRede = LED_SEM_REDE;             // segue sem WiFi: piscada longa a cada 2 s até conectar
     Serial.println(F("Sem WiFi: seguindo sem rede; reconecta quando o roteador voltar"));
+    logEvento(F("WiFi: sem rede no boot"));
     display.clear();
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 8, F("Sem WiFi"));
@@ -1290,6 +1388,10 @@ void iniciaServidorWeb() {
   server.on(F("/json"), HTTP_GET, paginaJson);
   server.on(F("/historico"), HTTP_GET, paginaHistorico);
   server.on(F("/sobre"), HTTP_GET, paginaSobre);
+#if LOG_WEB
+  server.on(F("/log.json"), HTTP_GET, paginaLogJson);
+  server.on(F("/log/limpar"), HTTP_POST, handleLogLimpar);
+#endif
   server.on(F("/config"), HTTP_GET, paginaConfig);
   server.on(F("/salvar"), HTTP_POST, handleSalvar);
   server.on(F("/display"), HTTP_POST, handleDisplay);
@@ -1350,10 +1452,12 @@ void loop() {
     if (!conectado && ledRede != LED_SEM_REDE) {
       ledRede = LED_SEM_REDE;
       Serial.println(F("WiFi caiu"));
+      logEvento(F("WiFi caiu"));
     } else if (conectado && ledRede == LED_SEM_REDE) {
       ledRede = LED_NORMAL;
       ledPulsoOk();
       Serial.println(F("WiFi voltou"));
+      logEvento(F("WiFi voltou: ") + WiFi.SSID() + F(", ") + String(WiFi.RSSI()) + F(" dBm"));
       iniciaOta();                      // se o boot foi sem rede, o OTA começa agora
       if (!weatherOk) nextWeatherUpdate = ms;   // sem clima ainda: atualiza já, sem esperar a nova tentativa
       if (!ipMostrado && displayLigado && !msgAtiva && !segurandoReset) {   // boot sem rede: mostra o IP na 1ª conexão
