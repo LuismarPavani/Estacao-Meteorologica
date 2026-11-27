@@ -33,7 +33,7 @@ String backupJson() {
   num(F("fuso"), fusoMin);
   sim(F("verao"), horarioVerao);
   // Display
-  sim(F("telaLigada"), displayLigado);
+  sim(F("telaLigada"), displayLigadoSalvo);
   num(F("telas"), telasMask);
   num(F("telaSeg"), telaSeg);
   num(F("telaMin"), telaTimeoutMin);
@@ -160,7 +160,8 @@ void importaHora(Importacao& imp) {
 void importaDisplay(Importacao& imp) {
   String& s = imp.s;
   long n;
-  imp.simNao(F("telaLigada"), displayLigado);
+  imp.simNao(F("telaLigada"), displayLigadoSalvo);
+  displayLigado = displayLigadoSalvo;
   if (imp.pega(F("telas"))) {
     if (leInteiro(s, n) && n >= 1 && n <= 0x7F) { telasMask = n; imp.aplicados++; } else imp.ignora(F("telas"));
   }

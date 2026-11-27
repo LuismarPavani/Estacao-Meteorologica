@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-3.8.0-success)
+![Versão](https://img.shields.io/badge/firmware-3.8.1-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -784,6 +784,7 @@ EstacaoMeteorologica/
 | **3.6.4** | Tela de abertura: placa e versão em duas linhas ("ESP8266" e "v3.6.4"); numa linha só o texto passava da tela e a versão aparecia cortada |
 | **3.7.0** | Código dividido em abas da Arduino IDE, sem mudar o funcionamento: a aba principal (`EstacaoMeteorologica.ino`) fica com bibliotecas, tipos, globais, protótipos, tabelas, `setup` e `loop`; as funções vão para `Config`, `Placa`, `Clima`, `Tela`, `Painel`, `Web`, `WebConfig`, `WebAcoes` e `Backup`. As abas `Tela` e `Placa` juntam o que muda no porte para ESP32. Ao atualizar uma pasta antiga, apague o `EstacaoMeteorologica.ino` antigo antes de copiar os novos |
 | **3.8.0** | Página **Sobre** (`/sobre`, sem senha): versão, placa e sensor deste aparelho, resumo do projeto, links do GitHub (firmware, painel e perfil), do manual e do painel online, e os créditos. Acesso pelo link **Sobre a estação** no rodapé da página principal e pelo item **Sobre** no menu da `/config`; o "‹ voltar" volta para a página de onde veio |
+| **3.8.1** | Correção: a tela podia começar o boot **apagada** (sem abertura e sem a tela do WiFi) e só acender já no relógio. Quando ela apagava pelo tempo de tela ligada ou pela agenda e depois algum ajuste era salvo (ou as coordenadas da cidade chegavam), o estado "apagada" ia para a EEPROM. Agora só a escolha manual (botão de ligar/apagar da página ou backup) é gravada. O boot **sempre** mostra a abertura, a conexão ao WiFi e o IP; se a tela foi apagada pela página, ela apaga no fim do boot |
 
 ---
 

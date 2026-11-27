@@ -377,6 +377,7 @@ void handleDisplay() {
   if (v.equals(F("1"))) displayLigado = true;
   else if (v.equals(F("0"))) displayLigado = false;
   else displayLigado = !displayLigado;
+  displayLigadoSalvo = displayLigado;   // escolha manual: é ela que vale no próximo boot
   aplicaDisplay();
   telaAcordadaNoite = false;
   if (displayLigado) armaTimerTela(telaDuracaoPadraoMs());

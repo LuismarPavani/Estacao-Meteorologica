@@ -28,7 +28,8 @@ void carregaConfig() {
   OPEN_WEATHER_MAP_APP_ID = String(c.apiKey);
   OPEN_WEATHER_MAP_LOCATION_ID = String(c.locationId);
   OPEN_WEATHER_MAP_LANGUAGE = String(c.lang);
-  displayLigado = (c.displayLigado != 0);
+  displayLigadoSalvo = (c.displayLigado != 0);
+  displayLigado = displayLigadoSalvo;
   agendaAtiva = (c.agendaAtiva == 1);
   if (c.fusoOk == 0xA5 && c.fuso >= -720 && c.fuso <= 840) {   // só usa se foi salvo de fato
     fusoMin = c.fuso;
@@ -83,7 +84,9 @@ void salvaConfig() {
   snprintf(c.apiKey, sizeof(c.apiKey), "%s", OPEN_WEATHER_MAP_APP_ID.c_str());
   snprintf(c.locationId, sizeof(c.locationId), "%s", OPEN_WEATHER_MAP_LOCATION_ID.c_str());
   OPEN_WEATHER_MAP_LANGUAGE.toCharArray(c.lang, sizeof(c.lang));   // corta no tamanho do campo e sempre termina com '\0'
-  c.displayLigado = displayLigado ? 1 : 0;
+  // Grava a escolha manual, não o estado de agora: se a tela apagou pelo tempo de tela ligada ou pela
+  // agenda, salvar outro ajuste não pode fazer o próximo boot começar com a tela apagada.
+  c.displayLigado = displayLigadoSalvo ? 1 : 0;
   c.agendaAtiva = agendaAtiva ? 1 : 0;
   c.fusoOk = 0xA5;
   c.fuso = fusoMin;

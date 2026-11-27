@@ -342,7 +342,8 @@ uint8_t loginFalhas = 0;                // senhas erradas seguidas
 unsigned long loginLiberaEm = 0;        // após 5 erros, novas tentativas só depois deste millis()
 
 // ---- Tela: ligada/apagada, tempo de cada tela e tempo de tela ligada ----------------------
-bool displayLigado = true;              // false = tela OLED apagada (salvo na EEPROM)
+bool displayLigado = true;              // false = tela OLED apagada agora (pela escolha, pelo tempo de tela ligada ou pela agenda)
+bool displayLigadoSalvo = true;         // escolha manual (botão da página e backup): é ela que vai para a EEPROM e vale no boot
 uint8_t telaSeg = 5;                     // segundos de cada tela do OLED (5 a 30, de 5 em 5)
 uint8_t telaTimeoutMin = 0;             // tempo de tela ligada: 0 = sempre ligada; 1, 5, 10, 15, 30 ou 60 min
 unsigned long telaDesligaEm = 0;        // millis() em que a tela apaga sozinha
@@ -1122,6 +1123,8 @@ void setup() {
 
   EEPROM.begin(sizeof(Config));
   carregaConfig();
+  displayLigado = true;                 // o boot sempre aparece (abertura, WiFi e IP): mostra que deu tudo certo.
+                                        // A escolha salva (displayLigadoSalvo) vale no fim do setup().
 
   iniciaPinosESensor();                 // LED, botões, sensor de energia e DHT
   iniciaDisplayBoot();                  // display, varredura I2C e tela de abertura
@@ -1139,6 +1142,12 @@ void setup() {
   if (bateriaAtiva) atualizaBateria();
   atualizaClima(&display);
   iniciaServidorWeb();
+
+  if (!displayLigadoSalvo) {            // tela apagada pela página: apaga agora, depois de mostrar o boot
+    displayLigado = false;
+    telaContando = false;
+    aplicaDisplay();
+  }
 }
 
 /** Boot: LED de status, botões, sensor de energia da placa UPS e sensor DHT. */
