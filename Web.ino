@@ -136,16 +136,14 @@ String fmtBytes(uint32_t b) {
   return String(b / 1024UL) + F(" KB");
 }
 
-/** Formata segundos como 'Xd Xh Xmin Xs'. */
+/** Tempo ligado: '12min 5s' (menos de 1 h), '5h 32min' (menos de 1 dia) ou '2 d 3 h'. */
 String formataUptime(unsigned long s) {
   unsigned long d = s / 86400UL;
   unsigned long h = (s % 86400UL) / 3600UL;
   unsigned long m = (s % 3600UL) / 60UL;
-  unsigned long seg = s % 60UL;
-  String o = "";
-  if (d) o += String(d) + F("d ");
-  o += String(h) + F("h ") + String(m) + F("min ") + String(seg) + F("s");
-  return o;
+  if (d) return String(d) + F(" d ") + String(h) + F(" h");
+  if (h) return String(h) + F("h ") + String(m) + F("min");
+  return String(m) + F("min ") + String(s % 60UL) + F("s");
 }
 
 /** Monta uma linha de informação da /config (rótulo à esquerda, valor à direita, como nos Ajustes do iPhone). */

@@ -438,6 +438,10 @@ bool btnLido[2] = {false, false};       // última leitura bruta
 unsigned long btnMudou[2] = {0, 0};     // quando a leitura bruta mudou (debounce)
 unsigned long btnDesde[2] = {0, 0};     // quando o botão foi pressionado
 
+// ---- Memória livre no começo do boot (referência do "de ~X KB" na seção Sistema) ----------
+// O ESP8266 não informa o tamanho total do heap; o livre no início do setup() é o mais perto disso.
+uint32_t heapBoot = 0;
+
 // ---- Registro de eventos (/config → Registro): anel fixo na RAM, perdido ao reiniciar -------
 #if LOG_WEB
 struct LogEntrada {
@@ -623,7 +627,12 @@ String iconeSinal(int pct);
 String iconeBateria(int pct);
 String tabelaBateria();
 String tabelaWiFi();
-String tabelaSistema();
+void enviaTabelaSistema();
+String linhaViva(uint8_t k);
+void paginaSistemaJson();
+String barraPct(uint8_t pct, char nivel, const String& texto);
+String linhaSub(const __FlashStringHelper* rotulo, const String& sub, const String& valor);
+String kb1(uint32_t bytes);
 String tempoCurto(unsigned long s);
 String msgConfig(const String& r, bool& erro);
 String secaoResumo(uint8_t k);
@@ -942,6 +951,51 @@ busca();setInterval(busca,2000);
 )rawliteral";
 #endif
 
+// ---- /config → Sistema: barras de progresso (texto no meio, invertido sobre a parte preenchida) --
+// Cor pelo nível: .ok verde, .at amarelo, .ru vermelho. O preenchimento vem em style="--p:NN%".
+static const char SIS_CSS[] PROGMEM = R"rawliteral(<style>
+.pb{position:relative;flex:none;width:58%;max-width:230px;height:22px;border-radius:5px;overflow:hidden;
+background:#ffffff14;border:1px solid #ffffff2e;font-size:.8rem;font-weight:600;font-variant-numeric:tabular-nums}
+.pb .t,.pb .f{position:absolute;inset:0;display:grid;place-items:center;white-space:nowrap}
+.pb .t{color:#dfe7ee}.pb .f{clip-path:inset(0 calc(100% - var(--p)) 0 0)}
+.pb.ok .f{background:linear-gradient(#5cc46a,#3d9a4b);color:#fff}
+.pb.at .f{background:linear-gradient(#ffc061,#e89b2c);color:#1c1300}
+.pb.ru .f{background:linear-gradient(#f2645f,#c93a37);color:#fff}
+.copiado{background:#66bb6a!important;color:#fff!important}
+.bts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:-8px 0 20px}.mini.sec{background:#ffffff1a;color:#fff}</style>)rawliteral";
+
+// Botão 'Copiar diagnóstico': junta o texto de cada linha de #diag, por grupo. Em http o navegador
+// não libera navigator.clipboard, então usa textarea + execCommand. Funções como 'const x=()=>{}'
+// (uma linha começando com 'function x(){' vira protótipo C++ inserido aqui pela IDE).
+static const char SIS_JS[] PROGMEM = R"rawliteral(
+<button class="btn sec" id="bc" type="button" onclick="copiar()">📋 Copiar diagnóstico</button>
+<div class="note" style="margin-top:-8px">Copia os valores acima como texto, para colar numa mensagem quando algo der errado.</div>
+<script>
+const copiar=()=>{const L=['Estação Meteorológica · diagnóstico'];
+document.querySelectorAll('#diag > .cap, #diag > .grp').forEach(e=>{
+if(e.classList.contains('cap')){L.push('','['+e.textContent+']');return}
+e.querySelectorAll('.it').forEach(it=>{const tx=it.querySelector('.tx');const k=tx.firstChild.textContent.trim();
+const sb=tx.querySelector('small');const vv=it.querySelector('.val')||it.querySelector('.pb .t');
+const v=vv?vv.innerText.replace(/\s*\n\s*/g,', ').replace(' ↗',''):'';L.push(k+': '+v+(sb?' ('+sb.textContent+')':''))})});
+const s=L.join('\n'),b=document.getElementById('bc');
+const ok=()=>{b.textContent='✅ Copiado';b.classList.add('copiado');setTimeout(()=>{b.textContent='📋 Copiar diagnóstico';b.classList.remove('copiado')},2000)};
+if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(s).then(ok);return}
+const a=document.createElement('textarea');a.value=s;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);
+a.select();try{document.execCommand('copy');ok()}catch(e){prompt('Copie o texto:',s)}a.remove()};
+let pausa=false,ocupado=false;const S=document.getElementById('sst');
+const busca=async()=>{if(pausa||ocupado||document.hidden)return;ocupado=true;const ac=new AbortController(),to=setTimeout(()=>ac.abort(),4000);
+try{const r=await fetch('/sistema.json',{cache:'no-store',signal:ac.signal});if(!r.ok)throw new Error('HTTP '+r.status);
+const tx=await r.text();let j;try{j=JSON.parse(tx)}catch(e){throw new Error(tx.indexOf('<')>=0?'login expirou: recarregue a página':'resposta inválida')}
+for(const id in j.l){const el=document.getElementById(id);if(el)el.outerHTML=j.l[id]}
+S.textContent=j.h?'Atualizado às '+j.h:'Atualizado agora'}
+catch(e){S.textContent='⚠️ Sem atualizar: '+(e.name=='AbortError'?'o ESP não respondeu':e.message)}
+finally{clearTimeout(to);ocupado=false}};
+const pausar=()=>{pausa=!pausa;document.getElementById('bp').textContent=pausa?'▶ Continuar':'⏸ Pausar';
+document.getElementById('bp').className=pausa?'mini sec':'mini';if(!pausa)busca()};
+setInterval(busca,5000);
+</script>
+)rawliteral";
+
 // ---- Página /sobre (texto fixo na flash; a parte "Este aparelho" é montada em paginaSobre) -----
 // Resumo do projeto e links. O manual completo é o README no GitHub (sempre atualizado).
 static const char SOBRE_HTML[] PROGMEM = R"rawliteral(
@@ -1208,6 +1262,7 @@ load();hist();setInterval(load,5000);setInterval(hist,60000);
  * abertura, WiFi (ou portal), hora (NTP), OTA, interface do OLED, primeiras leituras e servidor web.
  */
 void setup() {
+  heapBoot = ESP.getFreeHeap();         // antes de WiFi, servidor e clima ocuparem memória
   Serial.begin(115200);
   Serial.println();
   Serial.println();
@@ -1388,6 +1443,7 @@ void iniciaServidorWeb() {
   server.on(F("/json"), HTTP_GET, paginaJson);
   server.on(F("/historico"), HTTP_GET, paginaHistorico);
   server.on(F("/sobre"), HTTP_GET, paginaSobre);
+  server.on(F("/sistema.json"), HTTP_GET, paginaSistemaJson);
 #if LOG_WEB
   server.on(F("/log.json"), HTTP_GET, paginaLogJson);
   server.on(F("/log/limpar"), HTTP_POST, handleLogLimpar);

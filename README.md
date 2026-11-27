@@ -4,7 +4,7 @@ Estação meteorológica doméstica com **ESP8266**, display **OLED**, sensor de
 
 ![Plataforma](https://img.shields.io/badge/plataforma-ESP8266-blue)
 ![IDE](https://img.shields.io/badge/IDE-Arduino-00979D)
-![Versão](https://img.shields.io/badge/firmware-3.9.0-success)
+![Versão](https://img.shields.io/badge/firmware-3.11.0-success)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)
 
 > Projeto baseado no exemplo **WeatherStation** da biblioteca [ThingPulse ESP8266 Weather Station](https://github.com/ThingPulse/esp8266-weather-station) (MIT), bastante ampliado.
@@ -357,7 +357,7 @@ A página segue o estilo dos **Ajustes do iPhone**. Ela abre num **menu** com um
 | **Painel web** | Último envio, envio automático, cidade enviada, **Enviar dados agora** e os dados do painel (ID do dispositivo, URL da API e `DEVICE_KEY`) |
 | **WiFi** | Dados da conexão com ícone de sinal, abrir o portal de configuração e apagar a rede salva |
 | **LED de status** | Piscar para indicar o estado e seguir o horário da tela |
-| **Sistema** | Tempo ligado, motivo do último reinício, hora (NTP), servidores NTP, coordenadas, chip, CPU, flash, programa, memória, firmware, versão do core, sensor, **Desconectar todos os navegadores** (login), **Exportar e Importar configurações** (backup), **Reiniciar o ESP** e **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
+| **Sistema** | Em 4 grupos: **Funcionamento** (tempo ligado, último reinício, hora, servidores NTP, sensor, coordenadas com link para o mapa), **Memória** (barras coloridas de programa, memória livre, maior bloco e fragmentação), **Hardware** (chip, CPU, flash) e **Software** (firmware, core, SDK). Botão **Copiar diagnóstico**, **Desconectar todos os navegadores** (login), **Exportar e Importar configurações** (backup), **Reiniciar o ESP** e **Reset geral** (apaga WiFi e todos os ajustes, com confirmação) |
 
 Todas as páginas pedem login (`CONFIG_SENHA`). O botão **Sair** fica no fim do menu.
 
@@ -549,6 +549,7 @@ curl -X POST "https://SEU-APP.vercel.app/api/readings" \
 | GET | `/historico` | Histórico interno (arrays de temperatura e umidade) |
 | GET | `/sobre` | Página Sobre: versão, placa, sensor, resumo do projeto e links do GitHub e do painel (sem senha) |
 | GET | `/log.json` | Registro de eventos, do mais novo para o mais antigo (com login) |
+| GET | `/sistema.json` | Linhas da seção Sistema que mudam (tempo ligado, hora, sensor e memória), já em HTML (com login) |
 | POST | `/log/limpar` | Apaga o registro de eventos (com login) |
 | GET | `/config` e `/config?s=clima\|display\|hora\|bateria\|painel\|wifi\|led\|sistema` | Menu das configurações e cada seção (pede login) |
 | GET | `/login` | Página de login da configuração |
@@ -808,6 +809,8 @@ EstacaoMeteorologica/
 | **3.8.0** | Página **Sobre** (`/sobre`, sem senha): versão, placa e sensor deste aparelho, resumo do projeto, links do GitHub (firmware, painel e perfil), do manual e do painel online, e os créditos. Acesso pelo link **Sobre a estação** no rodapé da página principal e pelo item **Sobre** no menu da `/config`; o "‹ voltar" volta para a página de onde veio |
 | **3.8.1** | Correção: a tela podia começar o boot **apagada** (sem abertura e sem a tela do WiFi) e só acender já no relógio. Quando ela apagava pelo tempo de tela ligada ou pela agenda e depois algum ajuste era salvo (ou as coordenadas da cidade chegavam), o estado "apagada" ia para a EEPROM. Agora só a escolha manual (botão de ligar/apagar da página ou backup) é gravada. O boot **sempre** mostra a abertura, a conexão ao WiFi e o IP; se a tela foi apagada pela página, ela apaga no fim do boot |
 | **3.9.0** | **Registro de eventos** em `/config` → Registro: os últimos eventos (ligar e motivo do reinício, WiFi, clima, envio ao painel com o código HTTP, energia externa, faixa da bateria, falha do sensor, login, ajustes salvos ou recusados, tela pela página e OTA), com hora, os mais novos em cima; atualiza a cada 2 s, com Pausar, Baixar .txt e Limpar. Fica num anel fixo na RAM (`LOG_BYTES`, padrão 1 KB = 21 eventos) e começa vazio a cada boot; `LOG_WEB 0` no `EstacaoConfig.h` desliga sem ocupar memória. Rotas `/log.json` e `/log/limpar` (com login). Nova aba `Registro.ino` |
+| **3.10.0** | Seção **Sistema** reorganizada em 4 grupos (Funcionamento, Memória, Hardware, Software). Memória com **barras coloridas** (verde, amarelo, vermelho): programa usado, memória livre (em relação à do início do boot), maior bloco livre (em vezes o que o HTTPS precisa) e fragmentação. ✅/⚠️ no último reinício (⚠️ depois de travar), na hora, no sensor e na flash (chip e IDE numa linha, ⚠️ se forem diferentes). Coordenadas com link para o mapa, tempo ligado mais curto (`2 d 3 h`) e botão **Copiar diagnóstico** |
+| **3.11.0** | Seção **Sistema** se atualiza sozinha a cada 5 s enquanto está aberta (tempo ligado, hora, sensor e as 4 barras de memória), com **Pausar** e "Atualizado às ..."; busca só as linhas que mudam (rota `/sistema.json`, com login, ~1,5 KB) e para quando a aba fica em segundo plano |
 
 ---
 

@@ -108,51 +108,195 @@ String tabelaWiFi() {
   return t;
 }
 
-/** Tabela HTML com informações do ESP8266 (tempo ligado, memória, flash, firmware, sensor...). */
-String tabelaSistema() {
-  String t;
-  t.reserve(1800);
-  t = F("<div class=\"grp\">");
+/** Uma barra de progresso da seção Sistema: pct = preenchimento (0-100), nivel 'o' ok, 'a' atenção, 'r' ruim. */
+String barraPct(uint8_t pct, char nivel, const String& texto) {
+  if (pct > 100) pct = 100;
+  String s = F("<span class=\"pb ");
+  s += (nivel == 'r') ? F("ru") : (nivel == 'a') ? F("at") : F("ok");
+  s += F("\" style=\"--p:");
+  s += String(pct);
+  s += F("%\"><span class=\"t\">");
+  s += texto;
+  s += F("</span><span class=\"f\">");
+  s += texto;
+  s += F("</span></span>");
+  return s;
+}
 
-  t += linhaInfo("Tempo ligado", formataUptime(millis() / 1000UL));
-  t += linhaInfo("Último reinício", htmlEsc(ESP.getResetReason()));
+/** Linha com rótulo, texto pequeno embaixo dele e, à direita, um valor (texto com class 'val' ou uma barra). */
+String linhaSub(const __FlashStringHelper* rotulo, const String& sub, const String& valor) {
+  String s = F("<div class=\"it\"><span class=\"tx\">");
+  s += rotulo;
+  if (sub.length()) { s += F("<small>"); s += sub; s += F("</small>"); }
+  s += F("</span>");
+  if (valor.startsWith(F("<span class=\"pb"))) {
+    s += valor;                         // barra de progresso
+  } else {
+    s += F("<span class=\"val\">");
+    s += valor;
+    s += F("</span>");
+  }
+  s += F("</div>");
+  return s;
+}
 
+/** Bytes em KB com uma casa ('25.9 KB'), como nas outras linhas da página. */
+String kb1(uint32_t bytes) {
+  return String(bytes / 1024.0f, 1) + F(" KB");
+}
+
+/**
+ * Linhas da seção Sistema que mudam com o tempo, numeradas (id "d0" a "d6"): 0 tempo ligado, 1 data e
+ * hora, 2 sensor, 3 programa, 4 memória livre, 5 maior bloco, 6 fragmentação. As mesmas funções montam
+ * a página e o /sistema.json (a página troca cada linha pelo id, a cada 5 s).
+ */
+String linhaViva(uint8_t k) {
+  String s;
+  if (k == 0) {
+    s = linhaInfo("Tempo ligado", formataUptime(millis() / 1000UL));
+  } else if (k == 1) {
+    time_t agora = time(nullptr);
+    if (agora > 100000) {
+      struct tm* ti = localtime(&agora);
+      char buf[32];   // com os casts o compilador sabe o tamanho máximo (evita -Wformat-truncation)
+      snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", (uint8_t)ti->tm_mday, (uint8_t)(ti->tm_mon + 1), (uint16_t)(ti->tm_year + 1900),
+               (uint8_t)ti->tm_hour, (uint8_t)ti->tm_min, (uint8_t)ti->tm_sec);
+      s = linhaInfo("Data e hora", String(F("✅ ")) + buf);
+    } else {
+      s = linhaInfo("Data e hora", F("⚠️ sem sincronização"));
+    }
+  } else if (k == 2) {
+    s = linhaInfo("Sensor " SENSOR_NOME, sensorUltimaOk ? String(F("✅ OK")) : F("⚠️ sem leitura válida (confira o dado no pino ") + nomePino(DHTPIN) + F(")"));
+  } else if (k == 3) {
+    uint32_t prog = ESP.getSketchSize(), progLivre = ESP.getFreeSketchSpace(), progTot = prog + progLivre;
+    uint8_t p = progTot ? (uint8_t)((uint64_t)prog * 100 / progTot) : 0;
+    s = linhaSub(F("Programa"), fmtBytes(prog) + F(" de ") + fmtBytes(progTot) + F(" · ") + fmtBytes(progLivre) + F(" livres"),
+                 barraPct(p, p <= 70 ? 'o' : (p <= 85 ? 'a' : 'r'), String(p) + F("% usado")));
+  } else if (k == 4) {
+    uint32_t livre = ESP.getFreeHeap();
+    uint32_t ref = heapBoot > livre ? heapBoot : livre;                 // nunca mais de 100% livre
+    uint8_t p = ref ? (uint8_t)((uint64_t)livre * 100 / ref) : 0;
+    s = linhaSub(F("Memória livre (heap)"), kb1(livre) + F(" livres de ~") + kb1(ref),
+                 barraPct(p, p >= 35 ? 'o' : (p >= 25 ? 'a' : 'r'), String(p) + F("% livre")));
+  } else if (k == 5) {
+    uint32_t bloco = ESP.getMaxFreeBlockSize();
+    uint32_t x10 = (uint32_t)((uint64_t)bloco * 10 / HTTPS_MIN_BLOCO);  // bloco ÷ o que o HTTPS precisa, x10
+    uint8_t p = x10 >= 20 ? 100 : (uint8_t)(x10 * 5);                   // cheia a partir de 2×; 1× = metade
+    String xs = String(x10 / 10) + ',' + String(x10 % 10) + F("×");
+    s = linhaSub(F("Maior bloco livre"), kb1(bloco) + F(" · o HTTPS precisa de ") + kb1(HTTPS_MIN_BLOCO),
+                 barraPct(p, x10 >= 20 ? 'o' : (x10 >= 10 ? 'a' : 'r'), xs + (x10 < 10 ? F(": HTTPS adiado") : F(" o necessário"))));
+  } else {
+    uint8_t frag = ESP.getHeapFragmentation();
+    s = linhaSub(F("Fragmentação do heap"), F("até 25% ok · até 50% atenção · acima, ruim"),
+                 barraPct(frag, frag <= 25 ? 'o' : (frag <= 50 ? 'a' : 'r'), String(frag) + F("%")));
+  }
+  String id = F("<div class=\"it\" id=\"d");
+  id += String(k);
+  id += '"';
+  s.replace(String(F("<div class=\"it\"")), id);   // cada linha tem um só <div class="it">
+  return s;
+}
+
+/**
+ * GET /sistema.json (com login): as linhas que mudam da seção Sistema, já em HTML, e a hora da
+ * resposta. ~1,5 KB, enviado em partes. A memória é lida antes de montar o resto (mede o ESP, não a resposta).
+ */
+void paginaSistemaJson() {
+  if (!exigeLogin()) return;
+  static const uint8_t ORDEM[] = {4, 5, 6, 3, 0, 1, 2};   // memória primeiro
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  String j = F("{\"l\":{");
+  for (uint8_t n = 0; n < sizeof(ORDEM); n++) {
+    if (n) j += ',';
+    j += F("\"d");
+    j += String(ORDEM[n]);
+    j += F("\":\"");
+    j += jsonEscape(linhaViva(ORDEM[n]));
+    j += '"';
+    server.sendContent(j);
+    j = "";
+  }
   time_t agora = time(nullptr);
+  char b[16] = "";
   if (agora > 100000) {
     struct tm* ti = localtime(&agora);
-    char buf[32];   // com os casts o compilador sabe o tamanho máximo (evita -Wformat-truncation)
-    snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", (uint8_t)ti->tm_mday, (uint8_t)(ti->tm_mon + 1), (uint16_t)(ti->tm_year + 1900),
-             (uint8_t)ti->tm_hour, (uint8_t)ti->tm_min, (uint8_t)ti->tm_sec);
-    t += linhaInfo("Data e hora (NTP)", buf);
-  } else {
-    t += linhaInfo("Data e hora (NTP)", F("Sem sincronização"));
+    snprintf(b, sizeof(b), "%02d:%02d:%02d", (uint8_t)ti->tm_hour, (uint8_t)ti->tm_min, (uint8_t)ti->tm_sec);
   }
-  t += linhaInfo("Servidores NTP", NTP_SERVIDOR_1 "<br>" NTP_SERVIDOR_2 "<br>" NTP_SERVIDOR_3);
-  t += linhaInfo("Coordenadas da cidade", coordOk ? String(cidadeLat, 4) + F(", ") + String(cidadeLon, 4) : String(F("ainda não recebidas")));
+  j = F("},\"h\":\"");
+  j += b;
+  j += F("\"}");
+  server.sendContent(j);
+  server.sendContent("");
+}
 
+/**
+ * Seção Sistema em 4 grupos (Funcionamento, Memória, Hardware, Software), enviada grupo a grupo para
+ * não montar a página inteira na RAM. Memória com barras coloridas pelo nível; ✅/⚠️ no reinício, na
+ * hora, no sensor e na flash. Tudo dentro de #diag, que o botão 'Copiar diagnóstico' lê. As linhas que
+ * mudam (linhaViva) são atualizadas pela página a cada 5 s, por /sistema.json.
+ */
+void enviaTabelaSistema() {
+  server.sendContent_P(SIS_CSS);
+  String t;
+  t.reserve(1200);
+
+  // ---- Funcionamento ----
+  uint32_t motivo = ESP.getResetInfoPtr()->reason;   // travou = watchdog de hardware, exceção ou watchdog de software
+  bool travou = (motivo == REASON_WDT_RST || motivo == REASON_EXCEPTION_RST || motivo == REASON_SOFT_WDT_RST);
+  t = F("<div id=\"diag\"><div class=\"cap\">Funcionamento</div><div class=\"grp\">");
+  t += linhaViva(0);
+  t += linhaInfo("Último reinício", (travou ? F("⚠️ ") : F("✅ ")) + htmlEsc(ESP.getResetReason()));
+  t += linhaViva(1);
+  t += linhaInfo("Servidores NTP", NTP_SERVIDOR_1 "<br>" NTP_SERVIDOR_2 "<br>" NTP_SERVIDOR_3);
+  t += linhaViva(2);
+  if (coordOk) {
+    String la = String(cidadeLat, 4), lo = String(cidadeLon, 4);
+    t += linhaInfo("Coordenadas da cidade", F("<a href=\"https://www.openstreetmap.org/?mlat=") + la + F("&amp;mlon=") + lo +
+                   F("#map=12/") + la + '/' + lo + F("\" target=\"_blank\" rel=\"noopener\">") + la + F(", ") + lo + F(" ↗</a>"));
+  } else {
+    t += linhaInfo("Coordenadas da cidade", F("ainda não recebidas"));
+  }
+  t += F("</div>");
+  server.sendContent(t);
+
+  // ---- Memória (barras) ----
+  t = F("<div class=\"cap\">Memória</div><div class=\"grp\">");
+  t += linhaViva(3);
+  t += linhaViva(4);
+  t += linhaViva(5);
+  t += linhaViva(6);
+  t += F("</div><div class=\"bts\"><button class=\"mini\" type=\"button\" id=\"bp\" onclick=\"pausar()\">⏸ Pausar</button>"
+         "<span class=\"note\" id=\"sst\" style=\"margin:0\">Atualiza sozinho a cada 5 s.</span></div>");
+  server.sendContent(t);
+
+  // ---- Hardware ----
   String chip = String(ESP.getChipId(), HEX);
   chip.toUpperCase();
   String flashId = String(ESP.getFlashChipId(), HEX);
   flashId.toUpperCase();
-
+  uint32_t fReal = ESP.getFlashChipRealSize(), fIde = ESP.getFlashChipSize();
+  String mhz = String(ESP.getFlashChipSpeed() / 1000000UL) + F(" MHz");
+  t = F("<div class=\"cap\">Hardware</div><div class=\"grp\">");
   t += linhaInfo("Chip ID", chip);
   t += linhaInfo("CPU", String(ESP.getCpuFreqMHz()) + F(" MHz"));
-  t += linhaInfo("Flash (chip real)", fmtBytes(ESP.getFlashChipRealSize()));
-  t += linhaInfo("Flash (config. da IDE)", fmtBytes(ESP.getFlashChipSize()));
-  t += linhaInfo("Velocidade da flash", String(ESP.getFlashChipSpeed() / 1000000UL) + F(" MHz"));
+  if (fReal == fIde) t += linhaSub(F("Flash"), F("chip e configuração da IDE iguais"), F("✅ ") + fmtBytes(fReal) + F(" · ") + mhz);
+  else t += linhaSub(F("Flash"), F("a IDE está configurada para outro tamanho · ") + mhz,
+                     F("⚠️ chip ") + fmtBytes(fReal) + F(" · IDE ") + fmtBytes(fIde));
   t += linhaInfo("ID da flash", flashId);
-  t += linhaInfo("Programa", fmtBytes(ESP.getSketchSize()) + F(" usados · ") + fmtBytes(ESP.getFreeSketchSpace()) + F(" livres"));
-  t += linhaInfo("Memória livre (heap)", String(ESP.getFreeHeap()) + F(" bytes"));
-  t += linhaInfo("Maior bloco livre", String(ESP.getMaxFreeBlockSize()) + F(" bytes"));
-  t += linhaInfo("Fragmentação do heap", String(ESP.getHeapFragmentation()) + F("%"));
+  t += F("</div>");
+  server.sendContent(t);
+
+  // ---- Software ----
+  t = F("<div class=\"cap\">Software</div><div class=\"grp\">");
   t += linhaInfo("Firmware", FIRMWARE_VERSAO);
-  t += linhaInfo("Sensor " SENSOR_NOME, sensorUltimaOk ? String(F("OK")) : F("sem leitura válida (confira o dado no pino ") + nomePino(DHTPIN) + F(")"));
   t += linhaInfo("Core ESP8266", htmlEsc(ESP.getCoreVersion()));
   t += linhaInfo("SDK", htmlEsc(String(ESP.getSdkVersion())));
   t += linhaInfo("Compilado em", String(__DATE__) + F(" ") + String(__TIME__));
-
-  t += F("</div>");
-  return t;
+  t += F("</div></div>");                // fecha o grupo e o #diag
+  server.sendContent(t);
+  server.sendContent_P(SIS_JS);         // botão 'Copiar diagnóstico'
 }
 
 // ---- /config: peças comuns ---------------------------------------------------------------
@@ -578,9 +722,8 @@ void cfgLed(const String& r) {
 /** Seção 'Sistema': informações do ESP8266, login (desconectar todos) e reset geral. */
 void cfgSistema(const String& r) {
   cfgCabecalho(F("Sistema"), F("/config"), F("Configurações"), r);
-  String h = tabelaSistema();
-  server.sendContent(h);
-  h = F("");
+  enviaTabelaSistema();
+  String h;
   if (loginAtivo()) {
     h += F("<div class=\"cap\">Login</div>"
          "<form method=\"POST\" action=\"/sair-todos\" onsubmit=\"return confirm('Desconectar todos os navegadores? Todos vão precisar digitar a senha de novo.')\">"
